@@ -1,0 +1,97 @@
+# Representative full config.yml fixture used by TestLoadConfig_LiveSampleParses
+# to validate LoadConfig against a complete realistic configuration shape.
+# The structure mirrors what a deployed cystemd instance receives via the
+# continuous-deployment loop. All names are brand-neutral (myproject_*).
+#
+# When updating this fixture:
+#   - Keep every continuous_deployment[] entry with its own autosync value, so
+#     the tolerant boolean parsing is exercised on every refresh.
+#   - Keep at least one entry per node_pool selector to mirror real topology.
+#   - Keep at least one autosync: false (observe-only) entry alongside the
+#     enabled ones — this is the operationally significant case.
+
+version: v5.0.24
+
+log_level: debug
+
+node_pools:
+  - selector: myapplication
+    nodes:
+      - HOST001
+  - selector: myapplication2
+    nodes:
+      - HOST004
+  - selector: myapplication3
+    nodes:
+      - HOST005
+  - selector: myapplication4
+    nodes:
+      - HOST006
+  - selector: myapplication5
+    nodes:
+      - HOST007
+  - selector: myapplication6
+    nodes:
+      - HOST008
+
+continuous_deployment:
+  - service: myproject_myapplication
+    selector: myapplication
+    replica: 1
+    git_branch: master
+    git_values: products/myproject/environments/dev/myproject_myapplication/values.yaml
+    git_values_config_key: .${selector}.services.${selector}.config.[]
+    git_values_version_key: .${selector}.global.image.tag
+    service_config: config.yml
+    secrets: kubernetes/myproject/myapplication/myproject-myapplication-dev
+    autosync: true
+  - service: myproject_myapplication2
+    selector: myapplication2
+    replica: 1
+    git_branch: master
+    git_values: products/myproject/environments/dev/myproject_myapplication2/values.yaml
+    git_values_config_key: .${selector}.services.${selector}.config.[]
+    git_values_version_key: .${selector}.global.image.tag
+    service_config: config.yml
+    secrets: kubernetes/myproject/myapplication2/myproject-myapplication2-dev
+    autosync: true
+  - service: myproject_myapplication3
+    selector: myapplication3
+    replica: 1
+    git_branch: master
+    git_values: products/myproject/environments/dev/myproject_myapplication3/values.yaml
+    git_values_config_key: .${selector}.services.${selector}.config.[]
+    git_values_version_key: .${selector}.global.image.tag
+    service_config: config.yml
+    secrets: kubernetes/myproject/myapplication3/myproject-myapplication3-dev
+    autosync: true
+  - service: myproject_myapplication4
+    selector: myapplication4
+    replica: 1
+    git_branch: master
+    git_values: products/myproject/environments/dev/myproject_myapplication4/values.yaml
+    git_values_config_key: .${selector}.services.${selector}.config.[]
+    git_values_version_key: .${selector}.global.image.tag
+    service_config: config.yml
+    secrets: kubernetes/myproject/myapplication4/myproject-myapplication4-dev
+    autosync: false
+  - service: myproject_myapplication5
+    selector: myapplication5
+    replica: 1
+    git_branch: releasedev
+    git_values: products/myproject/environments/dev/myproject_myapplication5/values.yaml
+    git_values_config_key: .${selector}.services.${selector}.config.[]
+    git_values_version_key: .${selector}.global.image.tag
+    service_config: config.yml
+    secrets: kubernetes/myproject/myapplication5/myproject-myapplication5-dev
+    autosync: true
+  - service: myproject_myapplication6
+    selector: myapplication6
+    replica: 1
+    git_branch: releasedev
+    git_values: products/myproject/environments/dev/myproject_myapplication6/values.yaml
+    git_values_config_key: .${selector}.services.${selector}.config.[]
+    git_values_version_key: .${selector}.global.image.tag
+    service_config: config.yml
+    secrets: kubernetes/myproject/myapplication6/myproject-myapplication6-dev
+    autosync: true

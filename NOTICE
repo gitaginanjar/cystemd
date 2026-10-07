@@ -1,0 +1,16 @@
+cystemd
+Copyright 2026 G.G (https://github.com/gitaginanjar)
+
+Licensed under the Apache License, Version 2.0; see LICENSE.
+
+Binary distributions of cystemd include the following Apache-2.0 licensed
+modules, whose NOTICE files require these attributions:
+
+github.com/coreos/go-systemd
+  CoreOS Project
+  Copyright 2018 CoreOS, Inc
+  This product includes software developed at CoreOS, Inc.
+  (http://www.coreos.com/).
+
+gopkg.in/yaml.v3
+  Copyright 2011-2016 Canonical Ltd.

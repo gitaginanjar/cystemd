@@ -1,0 +1,23 @@
+---
+# Trimmed Helm-style values.yaml exercising the resource-quota extraction keys.
+# Mirrors the structure in sample_resources_quota.log:
+#   .${selector}.services.${selector}.deployment.resources.limits.cpu    → 200m
+#   .${selector}.services.${selector}.deployment.resources.limits.memory → 1Gi
+# with selector = "application".
+application:
+  global:
+    project: sample
+    environment: dev
+    image:
+      tag: c2214735bf2afa8a074defa994fe1246a33ba785
+  services:
+    application:
+      deployment:
+        kind: Deployment
+        resources:
+          limits:
+            cpu: 200m
+            memory: 1Gi
+          requests:
+            cpu: 20m
+            memory: 200Mi

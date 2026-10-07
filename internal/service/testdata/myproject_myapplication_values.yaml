@@ -1,0 +1,89 @@
+---
+myapplication:
+  global:
+    project: myproject
+    environment: dev
+    repository: mycompany-cicd/myproject/myproject_myapplication
+    image:
+      tag: abc123def456abc123def456abc123def456abc123
+      pullSecrets:
+        - name: mycompanyregistry
+  services:
+    myapplication:
+      deployment:
+        kind: Deployment
+        labels:
+          commit: a32a672b99c682022d92e3b482d900ed12a6f993
+        replicaCount: 0
+        revisionHistoryLimit: 1
+        minReadySeconds: 60
+        strategyType: Recreate
+        image:
+          pullPolicy: IfNotPresent
+        ports:
+          - name: http
+            containerPort: 8888
+            protocol: TCP
+        env:
+          - name: TZ
+            value: Asia/Jakarta
+        envFrom:
+          - secretRef:
+              name: myproject-myapplication-dev
+        resources:
+          limits:
+            cpu: 200m
+            memory: 1Gi
+          requests:
+            cpu: 20m
+            memory: 200Mi
+        volumeMounts:
+          - name: config-volume
+            mountPath: /app/config.yml
+            subPath: config.yml
+          - name: token-storage
+            mountPath: /app/token
+          - name: log-storage
+            mountPath: /app/log
+        volumes:
+          - name: config-volume
+            configMap:
+              name: myproject-myapplication-dev
+              items:
+                - key: config.yml
+                  path: config.yml
+          - name: token-storage
+            persistentVolumeClaim:
+              claimName: myproject-myapplication-dev-token
+          - name: log-storage
+            persistentVolumeClaim:
+              claimName: myproject-myapplication-dev-log
+        terminationGracePeriodSeconds: 65
+      autoscaling:
+        enabled: true
+        minReplicas: 1
+        maxReplicas: 1
+        targetCPUUtilizationPercentage: 70
+        targetMemoryUtilizationPercentage: 70
+      pvc:
+        log:
+          storageClassName: myproject-standard-dev
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
+        token:
+          storageClassName: myproject-standard-dev
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+      config:
+        config.yml: |
+          app:
+            max_idle_time: 15000
+            name: myproject_myapplication
+            port: 8888
+          default_timeout: 5

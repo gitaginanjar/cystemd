@@ -241,6 +241,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	s.route(mux, "GET /api/v1/applications/{name}/managed-resources", false, s.handleManagedResources)
 	s.route(mux, "GET /api/v1/applications/{name}/manifests", false, s.handleManifests)
 	s.route(mux, "GET /api/v1/applications/{name}/revisions/{revision}/metadata", false, s.handleRevisionMetadata)
+	s.route(mux, "GET /api/v1/applications/{name}/syncwindows", false, s.handleSyncWindows)
 	s.route(mux, "GET /api/v1/applications/{name}/events", false, s.handleEvents)
 	s.route(mux, "GET /api/v1/applications/{name}/resource", false, s.handleResource)
 	s.route(mux, "GET /api/v1/applications/{name}/resource/actions", false, s.handleListActions)

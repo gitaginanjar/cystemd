@@ -71,6 +71,9 @@ func TestExamples(t *testing.T) {
 				if !o.Project.IsSourcePermitted("https://git.example.com/platform/deploy.git") {
 					t.Fatalf("%s: the examples' repository is not permitted", f)
 				}
+				if len(o.Project.Spec.SyncWindows) != 1 || !o.Project.Spec.SyncWindows[0].ManualSync {
+					t.Fatalf("%s: sync windows %+v", f, o.Project.Spec.SyncWindows)
+				}
 				continue
 			}
 			a := o.Application

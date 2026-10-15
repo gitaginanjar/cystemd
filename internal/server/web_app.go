@@ -77,6 +77,9 @@ func (s *Server) appPage(w http.ResponseWriter, r *http.Request, app *v1.Applica
 			p.NodeGroups = nodeGroups(p.Tree, rt)
 		}
 	}
+	if proj, err := s.Store.GetProject(r.Context(), app.Spec.Project); err == nil {
+		p.Windows = proj.WindowState(app, time.Now())
+	}
 	p.SyncCommit = s.commit(r.Context(), app.Spec.Source.RepoURL, app.Status.Sync.Revision)
 	if st := app.Status.OperationState; st != nil && st.SyncResult != nil {
 		p.LastCommit = s.commit(r.Context(), app.Spec.Source.RepoURL, st.SyncResult.Revision)

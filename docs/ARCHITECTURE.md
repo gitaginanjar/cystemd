@@ -123,8 +123,8 @@ gave the registered jobs.
 
 **Automation.** With `syncPolicy.automated`, an `OutOfSync` Application is
 synced unless the last automated sync of the same revision failed (Argo CD's
-"skipping auto-sync: failed previous sync attempt"), and pruning happens only
-with `prune: true`. With `selfHeal: true`, drift without a new commit (a job
+"skipping auto-sync: failed previous sync attempt") or its project's sync
+windows forbid it now, and pruning happens only with `prune: true`. With `selfHeal: true`, drift without a new commit (a job
 stopped or edited by hand, a key changed) is corrected after
 `self_heal_timeout`.
 

@@ -627,6 +627,8 @@ type AppProjectSpec struct {
 	Description  string                   `json:"description,omitempty" yaml:"description,omitempty"`
 	SourceRepos  []string                 `json:"sourceRepos,omitempty" yaml:"sourceRepos,omitempty"`
 	Destinations []ApplicationDestination `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	// SyncWindows allow or deny syncs at given times.
+	SyncWindows SyncWindows `json:"syncWindows,omitempty" yaml:"syncWindows,omitempty"`
 }
 
 // Repository is a connected Git repository. Secret material is never

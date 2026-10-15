@@ -348,9 +348,31 @@ func (s *Store) GetProject(ctx context.Context, name string) (*v1alpha1.AppProje
 	return &p, nil
 }
 
-// PutProject creates or replaces a project.
+// PutProject creates or replaces a project, keeping its creation time.
+// With a resourceVersion, it fails with ErrConflict unless the project is
+// still at that version.
 func (s *Store) PutProject(ctx context.Context, p *v1alpha1.AppProject) error {
+	key := s.key(projectsDir, p.Metadata.Name)
 	c := *p
+	var index uint64
+	cur, err := s.kv.Get(ctx, key)
+	switch {
+	case err == nil:
+		index = cur.ModifyIndex
+		var prev v1alpha1.AppProject
+		if json.Unmarshal(cur.Value, &prev) == nil && prev.Metadata.CreationTimestamp != nil {
+			c.Metadata.CreationTimestamp = prev.Metadata.CreationTimestamp
+		}
+	case !errors.Is(err, ErrNotFound):
+		return err
+	}
+	// A resourceVersion makes it a conditional update: the project must not
+	// have changed since it was read.
+	if rv := p.Metadata.ResourceVersion; rv != "" {
+		if want, err := strconv.ParseUint(rv, 10, 64); err != nil || want != index {
+			return ErrConflict
+		}
+	}
 	c.Metadata.ResourceVersion = ""
 	if c.Metadata.CreationTimestamp == nil {
 		now := s.now().UTC().Truncate(time.Second)
@@ -360,7 +382,7 @@ func (s *Store) PutProject(ctx context.Context, p *v1alpha1.AppProject) error {
 	if err != nil {
 		return err
 	}
-	return s.kv.Put(ctx, s.key(projectsDir, p.Metadata.Name), b)
+	return s.kv.CAS(ctx, key, b, index)
 }
 
 // DeleteProject removes a project.

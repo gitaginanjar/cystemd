@@ -204,11 +204,11 @@ func (c *appGetCommand) Run(args []string) int {
 		printTree(c.out, app, tree)
 		return 0
 	}
-	c.printApp(app, cl)
+	c.printApp(ctx, app, cl)
 	return 0
 }
 
-func (c *appGetCommand) printApp(a *v1.Application, cl *client.Client) {
+func (c *appGetCommand) printApp(ctx context.Context, a *v1.Application, cl *client.Client) {
 	t := newTable(c.out)
 	t.row("Name:", a.Metadata.Name)
 	t.row("Project:", a.Spec.Project)
@@ -220,6 +220,9 @@ func (c *appGetCommand) printApp(a *v1.Application, cl *client.Client) {
 	t.row("Path:", orDash(a.Spec.Source.Path))
 	t.row("Source type:", string(a.Spec.Source.Type()))
 	t.row("Sync policy:", syncPolicy(a))
+	if st, err := cl.SyncWindows(ctx, a.Metadata.Name); err == nil && st.Summary() != "" {
+		t.row("Sync window:", st.Summary())
+	}
 	rev := ""
 	if a.Status.Sync.Revision != "" {
 		rev = " to " + a.Spec.Source.Revision() + " (" + shortRev(a.Status.Sync.Revision) + ")"

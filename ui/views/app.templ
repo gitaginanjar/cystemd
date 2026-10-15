@@ -158,6 +158,23 @@ templ statusPanel(p AppPage) {
 				}
 			</div>
 		</a>
+		if len(p.Windows.AssignedWindows) > 0 {
+			<div class="status-panel__section">
+				<div class="status-panel__title">Sync window</div>
+				<div class="status-panel__main">
+					@StatusIcon(WindowStatus(p.Windows), "icon--lg")
+					{ p.Windows.Summary() }
+				</div>
+				<div class="status-panel__detail">
+					for _, w := range p.Windows.ActiveWindows {
+						<div title={ w.Description }>Active: { WindowText(w) }</div>
+					}
+					if len(p.Windows.ActiveWindows) == 0 {
+						<div>No window active</div>
+					}
+				</div>
+			</div>
+		}
 		if st := p.App.Status.OperationState; st != nil {
 			<a class="status-panel__section status-panel__section--grow status-panel__link" href={ SafeURL(p.Href("panel", "status")) } hx-get={ p.Href("panel", "status") } hx-target="#panel" hx-push-url="true">
 				<div class="status-panel__title">

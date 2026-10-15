@@ -474,3 +474,46 @@ func TestWebStaticAssets(t *testing.T) {
 		t.Fatalf("root redirect: %d %q", resp.StatusCode, resp.Header.Get("Location"))
 	}
 }
+
+func TestWebSyncWindows(t *testing.T) {
+	h := newHarness(t)
+	proj := v1.AppProject{
+		Metadata: v1.ObjectMeta{Name: "frozen"},
+		Spec: v1.AppProjectSpec{
+			Description:  "Change freeze",
+			SourceRepos:  []string{"*"},
+			Destinations: []v1.ApplicationDestination{{Name: "*", Namespace: "*"}},
+			SyncWindows: v1.SyncWindows{
+				{Kind: "deny", Schedule: "* * * * *", Duration: "2m", Applications: []string{"web"}, Description: "freeze"},
+				{Kind: "allow", Schedule: "0 2 * * *", Duration: "1h", Namespaces: []string{"batch"}, ManualSync: true, TimeZone: "Asia/Jakarta"},
+			},
+		},
+	}
+	if code := h.do("POST", "/api/v1/projects", h.admin, proj, nil); code != 200 {
+		t.Fatalf("create project: %d", code)
+	}
+	app := demoApp("web")
+	app.Spec.Project = "frozen"
+	if code := h.do("POST", "/api/v1/applications", h.admin, app, nil); code != 200 {
+		t.Fatalf("create app: %d", code)
+	}
+
+	// The application's status panel says syncs are denied, and why.
+	_, body := h.web("GET", "/ui/applications/web", h.admin, nil, false, "")
+	mustContain(t, body, "Sync window", ">Denied", "Active: deny * * * * * for 2m")
+
+	// The project page lists the windows.
+	_, body = h.web("GET", "/ui/settings/projects/frozen", h.admin, nil, false, "")
+	mustContain(t, body, "Sync windows", "<td>deny</td>", "<b>Active</b>", "Asia/Jakarta", ">Inactive<")
+
+	// Editing the summary keeps the windows.
+	form := url.Values{"description": {"Freeze for the release"}, "sourceRepos": {"*"}, "destinations": {"*/*"}}
+	if resp, body := h.web("POST", "/ui/settings/projects/frozen", h.admin, form, true, ""); resp.StatusCode != 200 {
+		t.Fatalf("update: %s\n%s", resp.Status, abbreviate(body))
+	}
+	var got v1.AppProject
+	h.do("GET", "/api/v1/projects/frozen", h.admin, nil, &got)
+	if got.Spec.Description != "Freeze for the release" || len(got.Spec.SyncWindows) != 2 {
+		t.Fatalf("project after the form: %+v", got.Spec)
+	}
+}

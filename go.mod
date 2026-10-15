@@ -8,6 +8,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hashicorp/cli v1.1.7
 	github.com/hashicorp/consul/api v1.34.5
+	github.com/hashicorp/cronexpr v1.1.3
 	github.com/hashicorp/hcl/v2 v2.20.2-nomad-1
 	github.com/hashicorp/nomad/api v0.0.0-20260917172403-9dcbdc5e64ec
 	github.com/hashicorp/vault/api v1.23.0
@@ -45,7 +46,6 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/hashicorp/cronexpr v1.1.3 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-hclog v1.6.3 // indirect

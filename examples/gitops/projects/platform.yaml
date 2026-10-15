@@ -9,3 +9,12 @@ spec:
   destinations:
     - name: in-cluster
       namespace: platform
+  # No automated syncs over the weekend; people may still sync by hand.
+  syncWindows:
+    - kind: deny
+      schedule: "0 18 * * 5"
+      duration: 62h
+      timeZone: Europe/Amsterdam
+      applications: ["*"]
+      manualSync: true
+      description: Weekend freeze

@@ -355,6 +355,49 @@ templ ProjectView(p ProjectPage) {
 				</div>
 			</div>
 			<div class="white-box">
+				<div class="white-box__title">Sync windows</div>
+				if len(p.Project.Spec.SyncWindows) == 0 {
+					<div class="muted">No sync windows: the applications of this project may sync at any time.</div>
+				} else {
+					<table class="table table--compact">
+						<thead>
+							<tr>
+								<th>Kind</th>
+								<th>Schedule</th>
+								<th>Duration</th>
+								<th>Time zone</th>
+								<th>Applications</th>
+								<th>Namespaces</th>
+								<th>Clusters</th>
+								<th>Manual sync</th>
+								<th>Now</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, w := range p.Project.Spec.SyncWindows {
+								<tr title={ w.Description }>
+									<td>{ w.Kind }</td>
+									<td class="mono">{ w.Schedule }</td>
+									<td>{ w.Duration }</td>
+									<td>{ OrDash(w.TimeZone) }</td>
+									<td class="mono">{ JoinOrDash(w.Applications) }</td>
+									<td class="mono">{ JoinOrDash(w.Namespaces) }</td>
+									<td class="mono">{ JoinOrDash(w.Clusters) }</td>
+									<td>{ YesNo(w.ManualSync) }</td>
+									<td>
+										if ActiveNow(w) {
+											<b>Active</b>
+										} else {
+											<span class="muted">Inactive</span>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+			<div class="white-box">
 				<div class="white-box__title">Applications</div>
 				if len(p.Apps) == 0 {
 					<div class="muted">No applications use this project.</div>

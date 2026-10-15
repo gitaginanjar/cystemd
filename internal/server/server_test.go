@@ -374,3 +374,58 @@ func TestWebhookRefreshesTheApplicationsOfThePush(t *testing.T) {
 		t.Fatalf("ping: %d %v", code, out)
 	}
 }
+
+func TestSyncWindows(t *testing.T) {
+	h := newHarness(t)
+	// Fires every minute and lasts two: always active.
+	proj := v1.AppProject{
+		Metadata: v1.ObjectMeta{Name: "frozen"},
+		Spec: v1.AppProjectSpec{
+			SourceRepos:  []string{"*"},
+			Destinations: []v1.ApplicationDestination{{Name: "*", Namespace: "*"}},
+			SyncWindows:  v1.SyncWindows{{Kind: "deny", Schedule: "* * * * *", Duration: "2m", Applications: []string{"web*"}}},
+		},
+	}
+	if code := h.do("POST", "/api/v1/projects", h.admin, proj, nil); code != 200 {
+		t.Fatalf("create project: %d", code)
+	}
+	for _, name := range []string{"web", "web-preview", "api"} {
+		app := demoApp(name)
+		app.Spec.Project = "frozen"
+		if code := h.do("POST", "/api/v1/applications", h.admin, app, nil); code != 200 {
+			t.Fatalf("create %s: %d", name, code)
+		}
+	}
+
+	var st v1.SyncWindowState
+	if h.do("GET", "/api/v1/applications/web/syncwindows", h.admin, nil, &st); st.CanSync || st.AutoSync || len(st.ActiveWindows) != 1 {
+		t.Fatalf("window state: %+v", st)
+	}
+	var e struct{ Message string }
+	if code := h.do("POST", "/api/v1/applications/web/sync", h.admin, map[string]any{}, &e); code != 403 || e.Message != "cannot sync: blocked by sync window" {
+		t.Fatalf("sync during a deny window: %d %+v", code, e)
+	}
+	// A dry run changes nothing; an application the window does not
+	// match syncs.
+	if code := h.do("POST", "/api/v1/applications/web-preview/sync", h.admin, map[string]any{"dryRun": true}, nil); code != 200 {
+		t.Fatalf("dry run: %d", code)
+	}
+	if code := h.do("POST", "/api/v1/applications/api/sync", h.admin, map[string]any{}, nil); code != 200 {
+		t.Fatalf("unmatched application: %d", code)
+	}
+
+	// manualSync lets manual syncs through; the update is conditional.
+	var current v1.AppProject
+	h.do("GET", "/api/v1/projects/frozen", h.admin, nil, &current)
+	stale := current
+	current.Spec.SyncWindows[0].ManualSync = true
+	if code := h.do("PUT", "/api/v1/projects/frozen", h.admin, current, nil); code != 200 {
+		t.Fatalf("update project: %d", code)
+	}
+	if code := h.do("PUT", "/api/v1/projects/frozen", h.admin, stale, nil); code != 409 {
+		t.Fatalf("stale project update: %d", code)
+	}
+	if code := h.do("POST", "/api/v1/applications/web/sync", h.admin, map[string]any{}, nil); code != 200 {
+		t.Fatalf("manual sync with manualSync: %d", code)
+	}
+}

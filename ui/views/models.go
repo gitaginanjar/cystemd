@@ -165,6 +165,8 @@ type AppPage struct {
 	Perms      AppPerms
 	Filter     string
 	TreeErr    string
+	// Windows is how the project's sync windows stand for the app.
+	Windows v1.SyncWindowState
 }
 
 // Href builds a URL on the details page keeping the view mode.

@@ -226,6 +226,42 @@ func TestProjectsAndSettings(t *testing.T) {
 	}
 }
 
+func TestPutProject(t *testing.T) {
+	ctx := context.Background()
+	s := New(NewMemoryKV(), "cystemd")
+	clock := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return clock }
+	p := &v1alpha1.AppProject{Metadata: v1alpha1.ObjectMeta{Name: "platform"}, Spec: v1alpha1.AppProjectSpec{SourceRepos: []string{"*"}}}
+	if err := s.PutProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	read, err := s.GetProject(ctx, "platform")
+	if err != nil || read.Metadata.CreationTimestamp == nil || !read.Metadata.CreationTimestamp.Equal(clock) {
+		t.Fatalf("%v %+v", err, read)
+	}
+
+	// Updates keep the creation time; a resourceVersion makes them
+	// conditional.
+	clock = clock.Add(time.Hour)
+	read.Spec.Description = "Platform team"
+	if err := s.PutProject(ctx, read); err != nil {
+		t.Fatal(err)
+	}
+	stale := *read
+	stale.Spec.Description = "lost update"
+	if err := s.PutProject(ctx, &stale); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale write: %v", err)
+	}
+	again, _ := s.GetProject(ctx, "platform")
+	if again.Spec.Description != "Platform team" || !again.Metadata.CreationTimestamp.Equal(clock.Add(-time.Hour)) {
+		t.Fatalf("%+v", again)
+	}
+	unconditional := &v1alpha1.AppProject{Metadata: v1alpha1.ObjectMeta{Name: "platform"}, Spec: v1alpha1.AppProjectSpec{Description: "form"}}
+	if err := s.PutProject(ctx, unconditional); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRepositoryNeverStoresSecrets(t *testing.T) {
 	ctx := context.Background()
 	kv := NewMemoryKV()

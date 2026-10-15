@@ -194,7 +194,12 @@ func (s *Server) webUpdateProject(w http.ResponseWriter, r *http.Request) {
 	form.Set("name", name)
 	proj, f, err := projectFromForm(form)
 	if err == nil {
-		err = s.updateProject(r, proj)
+		// The form edits the summary; the sync windows are kept.
+		var existing *v1.AppProject
+		if existing, err = s.getProject(r, name); err == nil {
+			proj.Spec.SyncWindows = existing.Spec.SyncWindows
+			err = s.updateProject(r, proj)
+		}
 	}
 	if err != nil {
 		s.render(w, r, errorCode(err), views.ProjectPanelView(views.ProjectPanel{Form: f, Error: err.Error(), CloseHref: "/ui/settings/projects/" + url.PathEscape(name)}))

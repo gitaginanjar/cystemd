@@ -352,6 +352,51 @@ func U64(v *uint64) string {
 // SafeURL marks a server-built, same-origin URL as safe for href.
 func SafeURL(s string) templ.SafeURL { return templ.SafeURL(s) }
 
+// OrDash shows "—" for an empty value.
+func OrDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}
+
+// JoinOrDash lists values, or shows "—".
+func JoinOrDash(v []string) string { return OrDash(strings.Join(v, ", ")) }
+
+// YesNo shows a boolean.
+func YesNo(b bool) string {
+	if b {
+		return "Yes"
+	}
+	return "No"
+}
+
+// ActiveNow reports whether a sync window is in effect.
+func ActiveNow(w *v1.SyncWindow) bool { return w.Active(time.Now()) }
+
+// WindowStatus is the status icon of a sync window state.
+func WindowStatus(st v1.SyncWindowState) string {
+	switch {
+	case st.AutoSync:
+		return "Succeeded"
+	case st.CanSync:
+		return "Suspended"
+	}
+	return "Failed"
+}
+
+// WindowText describes a sync window in a line.
+func WindowText(w *v1.SyncWindow) string {
+	s := w.Kind + " " + w.Schedule + " for " + w.Duration
+	if w.TimeZone != "" {
+		s += " (" + w.TimeZone + ")"
+	}
+	if w.ManualSync {
+		s += ", manual syncs allowed"
+	}
+	return s
+}
+
 // SSOLoginURL starts a single sign-on with a Nomad auth method.
 func SSOLoginURL(method, returnURL string) templ.SafeURL {
 	q := url.Values{"method": {method}}

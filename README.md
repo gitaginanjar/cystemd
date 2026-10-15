@@ -28,8 +28,8 @@ converts a v4 installation.
   the live Nomad jobs and Consul keys, and reports `Synced` or `OutOfSync`
   with a diff and Nomad's own plan. A sync can be manual, partial, a dry run or
   pinned to another revision; an automated sync can prune what Git removed and
-  self-heal changes made outside Git. Sync options, waves and resource hooks
-  (PreSync, PostSync, SyncFail batch jobs) follow Argo CD's.
+  self-heal changes made outside Git. Sync options, waves, resource hooks
+  (PreSync, PostSync, SyncFail batch jobs) and sync windows follow Argo CD's.
 - **Health.** Argo CD's vocabulary (`Healthy`, `Progressing`, `Degraded`,
   `Suspended`, `Missing`) computed from deployments, allocations, task states
   and service checks.
@@ -164,7 +164,8 @@ spec:
 
 [docs/APPLICATIONS.md](docs/APPLICATIONS.md) is the reference: sources, the
 systemd source and its values keys, sync options, waves, resource hooks,
-ignored differences, health, projects and repositories. [examples/gitops](examples/gitops) is a
+ignored differences, health, projects and their sync windows, and
+repositories. [examples/gitops](examples/gitops) is a
 repository laid out for CYSTEMD.
 
 | | |

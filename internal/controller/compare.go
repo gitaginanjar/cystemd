@@ -42,6 +42,8 @@ type comparison struct {
 	// prune lists resources that are live, tracked and no longer desired.
 	prune      []v1.ResourceStatus
 	conditions []v1.ApplicationCondition
+	// project is the Application's project (its sync windows).
+	project *v1.AppProject
 }
 
 // syncWave orders job registration (meta cystemd.sync-wave, default 0).
@@ -110,6 +112,7 @@ func (c *Controller) compare(ctx context.Context, app *v1.Application, noCache b
 	if !project.IsSourcePermitted(src.RepoURL) {
 		return nil, fmt.Errorf("application repository %s is not permitted in project %q", src.RepoURL, project.Metadata.Name)
 	}
+	cmp.project = project
 
 	cluster, err := c.clusters.Get(app.Spec.Destination.Name)
 	if err != nil {

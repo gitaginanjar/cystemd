@@ -112,6 +112,14 @@ func (p *AppProject) Validate() error {
 			return fmt.Errorf("sourceRepos %q: %v", r, err)
 		}
 	}
+	for i, w := range p.Spec.SyncWindows {
+		if w == nil {
+			return fmt.Errorf("syncWindows[%d] is empty", i)
+		}
+		if err := w.Validate(); err != nil {
+			return fmt.Errorf("syncWindows[%d]: %w", i, err)
+		}
+	}
 	return nil
 }
 

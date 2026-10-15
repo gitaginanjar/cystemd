@@ -348,6 +348,17 @@ type SyncRequest struct {
 }
 
 func (s *Server) requestOperation(r *http.Request, app *v1.Application, op *v1.Operation, describe string) (*v1.Application, error) {
+	// The project's sync windows decide (a dry run changes nothing).
+	if op.Sync != nil && !op.Sync.DryRun {
+		proj, err := s.Store.GetProject(r.Context(), app.Spec.Project)
+		if err != nil {
+			return nil, err
+		}
+		if !proj.WindowState(app, time.Now()).CanSync {
+			s.audit(r, "applications/sync", appObject(app), "DENIED", "blocked by sync window")
+			return nil, forbidden("cannot sync: blocked by sync window")
+		}
+	}
 	updated, err := s.Store.MutateApplication(r.Context(), app.Metadata.Name, func(a *v1.Application) error {
 		if a.Operation != nil {
 			return fmt.Errorf("%w: another operation is already in progress", store.ErrConflict)
@@ -524,6 +535,21 @@ func (s *Server) event(r *http.Request, app *v1.Application, reason, message str
 		Type: "Normal", Reason: reason, Message: message, Username: id.Username,
 		Kind: v1.KindApplication, Name: app.Metadata.Name,
 	})
+}
+
+// handleSyncWindows is how the project's sync windows stand for the
+// Application.
+func (s *Server) handleSyncWindows(w http.ResponseWriter, r *http.Request) {
+	app := s.getApp(w, r, "get")
+	if app == nil {
+		return
+	}
+	proj, err := s.Store.GetProject(r.Context(), app.Spec.Project)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, proj.WindowState(app, time.Now()))
 }
 
 func (s *Server) handleRevisionMetadata(w http.ResponseWriter, r *http.Request) {

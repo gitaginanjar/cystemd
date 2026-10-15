@@ -71,6 +71,9 @@ cystemdctl logout                                     # forget the session
 | `proj list`, `proj get <name>` | Projects |
 | `proj create -f <manifest>` | Create the projects of a manifest (`-upsert`) |
 | `proj delete <name>` | Delete a project no application uses |
+| `proj windows list <proj>` | Its sync windows, with IDs and whether they are active |
+| `proj windows add <proj>` | Add one (`-kind allow\|deny`, `-schedule`, `-duration`, `-applications`, `-namespaces`, `-clusters`, `-and-operator`, `-manual-sync`, `-time-zone`) |
+| `proj windows delete <proj> <id>`, `enable-manual-sync`, `disable-manual-sync` | Remove one, or let manual syncs through it |
 | `repo list`, `repo add <url>`, `repo rm <url>` | Repository connections (`-username`, `-password` (`-` prompts), `-ssh-private-key-path`, `-insecure`, `-force`) |
 | `cluster list` | Destination clusters, their version and nodes |
 | `account get-user-info` | Who you are, your groups and roles |

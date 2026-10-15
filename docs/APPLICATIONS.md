@@ -355,6 +355,46 @@ The `default` project allows everything. An Application whose repository, or
 one of whose jobs' destinations, its project does not allow shows a
 `ComparisonError` condition and is not synced.
 
+### Sync windows
+
+As in Argo CD, a project's sync windows say when its Applications may sync:
+
+```yaml
+spec:
+  syncWindows:
+    - kind: deny                  # no syncs over the weekend…
+      schedule: "0 18 * * 5"      # from Friday 18:00 (a cron expression)
+      duration: 62h               # until Monday 08:00
+      timeZone: Europe/Amsterdam  # of the schedule; default UTC
+      applications: ["*"]         # globs; any of the lists matches…
+      manualSync: true            # …but people may still sync
+      description: Weekend freeze
+    - kind: allow                 # batch jobs only sync at night
+      schedule: "0 1 * * *"
+      duration: 2h
+      namespaces: ["batch-*"]
+      clusters: ["in-cluster"]
+      andOperator: true           # …or all of them, with andOperator
+```
+
+A window is active from each time its schedule fires, for its duration. For
+the windows that match an Application:
+
+- an active `deny` window blocks syncs; manual syncs pass when every active
+  deny window sets `manualSync`;
+- otherwise an active `allow` window lets syncs through;
+- otherwise, if there are `allow` windows, syncs are blocked outside them
+  (manual syncs pass when one of them sets `manualSync`);
+- without windows, syncs pass.
+
+Blocked automated syncs, self-heal included, wait for the window to allow
+them (the next comparison after it opens syncs). Blocked manual syncs and
+rollbacks are refused (`cannot sync: blocked by sync window`); dry runs are
+not, as they change nothing. The Application's page shows a **Sync window**
+status (Allowed, Denied or Manual only) and the active windows; the
+project's page lists its windows. `cystemd proj windows` manages them, and
+`GET /api/v1/applications/<name>/syncwindows` returns an Application's.
+
 ## Repositories
 
 Public repositories need nothing. Private ones are connected in the UI

@@ -95,6 +95,16 @@ func Commands(ui cli.Ui, o Options) map[string]cli.CommandFactory {
 		"proj get":    func() (cli.Command, error) { return &projGetCommand{meta: m()}, nil },
 		"proj create": func() (cli.Command, error) { return &projCreateCommand{meta: m()}, nil },
 		"proj delete": func() (cli.Command, error) { return &projDeleteCommand{meta: m()}, nil },
+		"proj windows": func() (cli.Command, error) {
+			return &groupCommand{meta: m(), name: "proj windows", synopsis: "Manage a project's sync windows"}, nil
+		},
+		"proj windows list":   func() (cli.Command, error) { return &projWindowsListCommand{meta: m()}, nil },
+		"proj windows add":    func() (cli.Command, error) { return &projWindowsAddCommand{meta: m()}, nil },
+		"proj windows delete": func() (cli.Command, error) { return &projWindowsDeleteCommand{meta: m()}, nil },
+		"proj windows enable-manual-sync": func() (cli.Command, error) {
+			return &projWindowsManualCommand{meta: m(), enable: true}, nil
+		},
+		"proj windows disable-manual-sync": func() (cli.Command, error) { return &projWindowsManualCommand{meta: m()}, nil },
 
 		"repo": func() (cli.Command, error) {
 			return &groupCommand{meta: m(), name: "repo", synopsis: "Manage repository connections"}, nil

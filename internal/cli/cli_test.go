@@ -292,3 +292,27 @@ func TestMigrate(t *testing.T) {
 	mustFail(t, ctl(t, "", append(args, "-force", "-apply")...), "already exists")
 	mustOK(t, ctl(t, "", append(args, "-force", "-apply", "-upsert")...), "created")
 }
+
+func TestProjectSyncWindows(t *testing.T) {
+	s := newAPIServer(t)
+	isolate(t)
+	login(t, s)
+	mustFail(t, ctl(t, "", "proj", "windows", "add", "default", "-kind", "deny", "-schedule", "every friday", "-duration", "1h", "-applications", "*"),
+		`schedule "every friday" is not a cron expression`)
+	mustOK(t, ctl(t, "", "proj", "windows", "add", "default", "-kind", "deny", "-schedule", "* * * * *", "-duration", "2m",
+		"-applications", "web, api", "-time-zone", "Europe/Amsterdam", "-description", "freeze"), "Sync window 0 added to project default.")
+	mustOK(t, ctl(t, "", "proj", "windows", "add", "default", "-kind", "allow", "-schedule", "0 2 * * *", "-duration", "1h",
+		"-namespaces", "batch"), "Sync window 1 added")
+	mustOK(t, ctl(t, "", "proj", "windows", "list", "default"),
+		"0   Active    deny   * * * * *  2m        Europe/Amsterdam  web,api", "1   Inactive  allow  0 2 * * *  1h        -                 -             batch")
+	mustOK(t, ctl(t, "", "proj", "windows", "enable-manual-sync", "default", "0"), "updated")
+	mustOK(t, ctl(t, "", "proj", "windows", "list", "-o", "json", "default"), `"manualSync": true`)
+	mustFail(t, ctl(t, "", "proj", "windows", "delete", "default", "7"), "has no sync window \"7\"")
+	mustOK(t, ctl(t, "", "proj", "windows", "delete", "default", "1"), "deleted")
+
+	// The application's sync window, and a sync it blocks.
+	mustOK(t, ctl(t, "", "app", "create", "web", "-repo", "https://127.0.0.1:1/ops.git", "-path", "apps/web"), "created")
+	mustOK(t, ctl(t, "", "proj", "windows", "disable-manual-sync", "default", "0"), "updated")
+	mustOK(t, ctl(t, "", "app", "get", "web"), "Sync window:    Denied")
+	mustFail(t, ctl(t, "", "app", "sync", "web", "-async"), "cannot sync: blocked by sync window")
+}

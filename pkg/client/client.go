@@ -595,6 +595,13 @@ func (c *Client) GetProject(ctx context.Context, name string) (*v1.AppProject, e
 	return &out, c.do(ctx, http.MethodGet, "/api/v1/projects/"+esc(name), nil, nil, &out)
 }
 
+// SyncWindows is how the sync windows of its project stand for an
+// Application.
+func (c *Client) SyncWindows(ctx context.Context, app string) (*v1.SyncWindowState, error) {
+	var out v1.SyncWindowState
+	return &out, c.do(ctx, http.MethodGet, "/api/v1/applications/"+esc(app)+"/syncwindows", nil, nil, &out)
+}
+
 // CreateProject creates a project.
 func (c *Client) CreateProject(ctx context.Context, p *v1.AppProject) error {
 	return c.do(ctx, http.MethodPost, "/api/v1/projects", nil, p, nil)

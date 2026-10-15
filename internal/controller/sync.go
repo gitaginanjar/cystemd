@@ -679,6 +679,11 @@ func (c *Controller) autoSyncOperation(app *v1.Application, cmp *comparison) *v1
 			return nil
 		}
 	}
+	// The project's sync windows may forbid automated syncs now.
+	if cmp.project != nil && !cmp.project.WindowState(app, c.now()).AutoSync {
+		c.logger.Debug("skipping auto-sync: blocked by sync window", "app", app.Metadata.Name)
+		return nil
+	}
 	if last := app.Status.OperationState; last != nil && last.SyncResult != nil && last.SyncResult.Revision == cmp.revision &&
 		last.Operation.Sync != nil && last.Operation.Sync.RollbackID == nil {
 		switch last.Phase {

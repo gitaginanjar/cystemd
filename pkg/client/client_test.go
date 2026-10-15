@@ -60,10 +60,20 @@ func TestAgainstServer(t *testing.T) {
 		})
 	}()
 
-	for _, a := range []*v1.Application{app("web", "a"), app("api", "b")} {
-		if _, err := c.CreateApplication(ctx, a, false); err != nil {
-			t.Fatal(err)
+	// Once the watch reports web, it is live: what follows are events.
+	if _, err := c.CreateApplication(ctx, app("web", "a"), false); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev := <-events:
+		if ev != "ADDED web" {
+			t.Fatalf("first event: %s", ev)
 		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the watch reported nothing")
+	}
+	if _, err := c.CreateApplication(ctx, app("api", "b"), false); err != nil {
+		t.Fatal(err)
 	}
 	var ce *client.Error
 	if _, err := c.CreateApplication(ctx, app("web", "a"), false); !errors.As(err, &ce) || ce.Code != 409 {
@@ -87,7 +97,7 @@ func TestAgainstServer(t *testing.T) {
 	if _, err := c.GetApplication(ctx, "api", ""); !client.IsNotFound(err) {
 		t.Fatalf("deleted: %v", err)
 	}
-	want := map[string]bool{"ADDED web": false, "ADDED api": false, "MODIFIED web": false, "DELETED api": false}
+	want := map[string]bool{"ADDED api": false, "MODIFIED web": false, "DELETED api": false}
 	deadline := time.After(10 * time.Second)
 	for missing := len(want); missing > 0; {
 		select {

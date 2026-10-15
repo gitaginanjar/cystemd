@@ -5,7 +5,7 @@ to upstream Nomad** (`cystemd-server`). Both use Consul for state and Vault
 through a Vault Agent; neither holds a long-lived Vault token.
 
 ```
-                ┌──────────────── server hosts (×3) ───────────────┐
+                ┌──────────────── server hosts (×3) ────────────────┐
   browser ─────▶│ cystemd agent: Nomad server + control plane       │
   cystemd CLI   │   /v1/  Nomad API      /api/  CYSTEMD API         │
                 │   /ui/  CYSTEMD web UI (replaces Nomad's)         │
@@ -100,3 +100,26 @@ an external plugin (`make driver` → `cystemd-driver-systemd` in the client's
 `cystemd migrate` turns a CYSTEMD v4 host's `.env` (`VAULT_ADDRESS`,
 `VAULT_ROLE_ID`, `VAULT_TEMPLATES`…) into a Vault Agent configuration for that
 host (see [docs/MIGRATION.md](../docs/MIGRATION.md)).
+
+## Git webhooks
+
+Applications are compared with Git every `reconcile_interval`; a webhook makes
+it immediate. Point your Git server's push webhook at
+`https://cystemd.example.com/api/webhook` (on the agent: any server agent's
+address) with a secret, and give the control plane the same secret:
+
+```hcl
+webhook {
+  secret_file = "/etc/cystemd/secrets/webhook-secret"
+}
+```
+
+GitHub, Gitea, Gogs and Bitbucket sign their requests with it; GitLab sends it
+as its token. JSON and form-encoded payloads are both accepted. The response
+lists the Applications that were refreshed.
+
+## Upgrading
+
+The agent is upgraded like Nomad: one server at a time (the control plane
+fails over to another server), then the clients. A client's units keep
+running while its agent restarts; the driver re-attaches to them.

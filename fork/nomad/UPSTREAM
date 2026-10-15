@@ -1,4 +1,4 @@
-# CYSTEMD fork base — HashiCorp Nomad (BUSL-1.1, see fork/nomad/README.md).
+# CYSTEMD fork base — HashiCorp Nomad (BUSL-1.1, see docs/FORK.md).
 #
 # Sourced by scripts/fork-assemble.sh. The source is fetched through the Go
 # module proxy and checked against the Go checksum database AND the h1: sums

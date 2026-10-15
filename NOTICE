@@ -1,7 +1,33 @@
 cystemd
 Copyright 2026 G.G (https://github.com/gitaginanjar)
 
-Licensed under the Apache License, Version 2.0; see LICENSE.
+CYSTEMD's own code is licensed under the Apache License, Version 2.0; see
+LICENSE.
+
+
+HashiCorp Nomad and the cystemd agent
+-------------------------------------
+
+The `cystemd` agent (built from agent/) and the `cystemd-driver-systemd`
+plugin (built from driver/) are built from HashiCorp Nomad, Copyright IBM
+Corp., licensed under the Business Source License 1.1
+(https://github.com/hashicorp/nomad/blob/main/LICENSE). Those binaries, and
+the files under fork/nomad (an overlay and patches that modify Nomad), are
+subject to that license. See docs/FORK.md.
+
+`cystemd-server` and `cystemdctl` contain no Nomad code: they use HashiCorp's
+API clients for Nomad, Consul and Vault (github.com/hashicorp/nomad/api,
+github.com/hashicorp/consul/api, github.com/hashicorp/vault/api), licensed
+under the Mozilla Public License 2.0, whose source is available from those
+repositories. internal/licensecheck enforces the boundary.
+
+
+Third-party notices
+-------------------
+
+The web UI includes htmx and its server-sent events extension
+(ui/static/vendor), licensed under the Zero-Clause BSD license; their license
+texts are in ui/static/vendor.
 
 Binary distributions of cystemd include the following Apache-2.0 licensed
 modules, whose NOTICE files require these attributions:

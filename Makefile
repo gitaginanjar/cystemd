@@ -1,6 +1,7 @@
 # Makefile for CYSTEMD.
 #
 #   make              cystemd-server (standalone control plane + web UI)
+#                     and cystemdctl (the command line client)
 #   make agent        the cystemd agent: the Nomad fork with the control
 #                     plane, web UI and systemd driver built in
 #   make driver       the systemd driver as an external Nomad plugin
@@ -31,16 +32,20 @@ AGENT_LDFLAGS := $(LDFLAGS) \
 TEMPL_VERSION := v0.3.1020
 BIN := bin
 
-.PHONY: all build server agent fork driver generate check-generate vendor-htmx \
+.PHONY: all build server ctl agent fork driver generate check-generate vendor-htmx \
 	test test-race test-integration lint fmt clean help
 
-all: server
+all: server ctl
 
-build: server
+build: server ctl
 
 ## server: build bin/cystemd-server
 server:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN)/cystemd-server ./cmd/cystemd-server
+
+## ctl: build bin/cystemdctl, the command line client (also in the agent: cystemd app ...)
+ctl:
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN)/cystemdctl ./cmd/cystemdctl
 
 ## fork: assemble the Nomad fork into build/nomad (pinned upstream + overlay + patches)
 fork:

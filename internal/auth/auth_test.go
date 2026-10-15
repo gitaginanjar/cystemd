@@ -75,16 +75,21 @@ func TestBootstrapLoginAndPasswordChange(t *testing.T) {
 		t.Fatalf("unknown user: %v", err)
 	}
 
-	// Changing the password revokes earlier sessions.
-	time.Sleep(1100 * time.Millisecond)
+	// Changing the password revokes earlier sessions, and only those: a
+	// login right after it works (revocation is by session generation,
+	// not by time).
 	if err := m.UpdatePassword(ctx, "admin", pw, "a-new-long-password"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.Verify(ctx, tok); err == nil {
 		t.Fatal("session survived a password change")
 	}
-	if _, _, err := m.Login(ctx, "admin", "a-new-long-password"); err != nil {
+	tok2, _, err := m.Login(ctx, "admin", "a-new-long-password")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := m.Verify(ctx, tok2); err != nil {
+		t.Fatalf("session after the change: %v", err)
 	}
 	if err := m.UpdatePassword(ctx, "admin", "a-new-long-password", "short"); err == nil {
 		t.Fatal("short password accepted")

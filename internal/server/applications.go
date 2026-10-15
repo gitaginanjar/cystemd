@@ -216,7 +216,7 @@ func (s *Server) createApp(r *http.Request, app *v1.Application, upsert bool) (*
 	}
 	if err != nil {
 		if errors.Is(err, store.ErrExists) {
-			return nil, fmt.Errorf("%w: application %q already exists", store.ErrExists, app.Metadata.Name)
+			return nil, statusErr(http.StatusConflict, "application %q already exists (use upsert to replace its spec)", app.Metadata.Name)
 		}
 		return nil, err
 	}

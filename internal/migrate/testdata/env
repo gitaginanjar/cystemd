@@ -1,0 +1,14 @@
+# CYSTEMD v4 environment of a host
+GIT_REPOSITORY=git@git.example.com:platform/deploy.git
+GIT_CONFIGURATION=cystemd/config.yml
+GIT_INTERVAL=30s
+GIT_SSH_KEY_PRIVATE=/opt/cystemd/.ssh/id_ed25519
+export GIT_SSH_KNOWN_HOSTS='/opt/cystemd/.ssh/known_hosts'
+AUTH_ENABLED=true
+VAULT_ADDRESS=https://vault.example.com:8200
+VAULT_ROLE_ID=00000000-1111-2222-3333-444444444444
+VAULT_SECRET_ID=not-a-real-secret-id
+VAULT_SKIP_VERIFY=true
+VAULT_PATH=kubernetes/devtools/cystemd/cystemd
+VAULT_TEMPLATES="testdata/templates/app.tmpl:/etc/myapp/app.conf:systemctl reload myapp.service;testdata/templates/missing.tmpl:/etc/other/other.conf\nother.tmpl:/etc/other/second.conf"
+CYSTEMD_DNF_MAKECACHE_TIMEOUT=2m

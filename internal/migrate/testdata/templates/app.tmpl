@@ -1,0 +1,8 @@
+# Rendered by CYSTEMD v4 from Vault.
+db_user = {{ (secret "secret/myproject/app").db_user }}
+db_password = {{ secretField "secret/myproject/app" "db_password" }}
+api_key = {{ secretField "secret/myproject/app" "api-key" }}
+{{ with secret "secret/myproject/tls" }}cert = {{ .crt }}{{ end }}
+{{ range $k, $v := secret "secret/myproject/env" }}{{ $k }}={{ $v }}
+{{ end -}}
+note = plain text that mentions secret "here" stays as it is

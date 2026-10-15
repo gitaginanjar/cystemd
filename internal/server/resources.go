@@ -178,26 +178,57 @@ func parseLogRequest(q url.Values, alloc *api.Allocation) logRequest {
 
 // readLogs streams a task's log lines to emit, a batch per frame, until the
 // log ends (when not following), ctx is done or emit fails. emit(nil) is a
-// keep-alive tick. Starting near the end of a file, the partial first line
-// is dropped.
+// keep-alive tick. Reading starts near the end of the file: the backlog is
+// collected until the frames settle and only its last lr.tail lines are
+// emitted (the partial first line dropped), then new lines follow as they
+// come.
 func readLogs(ctx context.Context, cluster nomad.API, alloc *api.Allocation, lr logRequest, emit func(lines []string) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	frames, errs := cluster.Logs(ctx, alloc, lr.task, lr.logType, "end", int64(lr.tail)*240, lr.follow)
-	first := true
+	first, initial := true, true
 	var pending []byte
-	flush := func() error {
-		if len(pending) == 0 {
+	var backlog []string
+	out := func(lines []string) error {
+		if !initial {
+			return emit(lines)
+		}
+		backlog = append(backlog, lines...)
+		if len(backlog) > lr.tail {
+			backlog = backlog[len(backlog)-lr.tail:]
+		}
+		return nil
+	}
+	endBacklog := func() error {
+		if !initial {
 			return nil
 		}
-		line := string(pending)
-		pending = nil
-		return emit([]string{line})
+		initial = false
+		b := backlog
+		backlog = nil
+		if len(b) == 0 {
+			return nil
+		}
+		return emit(b)
+	}
+	finish := func() error {
+		if len(pending) > 0 {
+			line := string(pending)
+			pending = nil
+			if err := out([]string{line}); err != nil {
+				return err
+			}
+		}
+		return endBacklog()
 	}
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 	idle := time.NewTimer(2 * time.Second)
 	defer idle.Stop()
+	// settle ends the backlog once its frames stop coming.
+	settle := time.NewTimer(time.Hour)
+	settle.Stop()
+	defer settle.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -206,9 +237,13 @@ func readLogs(ctx context.Context, cluster nomad.API, alloc *api.Allocation, lr 
 			if err := emit(nil); err != nil {
 				return err
 			}
+		case <-settle.C:
+			if err := endBacklog(); err != nil {
+				return err
+			}
 		case <-idle.C:
 			if !lr.follow {
-				return flush()
+				return finish()
 			}
 		case err, ok := <-errs:
 			if ok && err != nil {
@@ -216,12 +251,15 @@ func readLogs(ctx context.Context, cluster nomad.API, alloc *api.Allocation, lr 
 			}
 		case f, ok := <-frames:
 			if !ok {
-				return flush()
+				return finish()
 			}
 			if f == nil || len(f.Data) == 0 {
 				continue
 			}
 			idle.Reset(2 * time.Second)
+			if initial {
+				settle.Reset(150 * time.Millisecond)
+			}
 			data := append(pending, f.Data...)
 			if first {
 				// Frame offsets mark where the data ends in the file.
@@ -244,7 +282,7 @@ func readLogs(ctx context.Context, cluster nomad.API, alloc *api.Allocation, lr 
 				lines = lines[:len(lines)-1]
 			}
 			if len(lines) > 0 {
-				if err := emit(lines); err != nil {
+				if err := out(lines); err != nil {
 					return err
 				}
 			}
@@ -253,7 +291,7 @@ func readLogs(ctx context.Context, cluster nomad.API, alloc *api.Allocation, lr 
 }
 
 // handleLogs streams an allocation task's logs as server-sent events.
-// tailLines approximates `tail -n` by starting near the end of the file.
+// tailLines (or tail) is how many lines to start with, like `tail -n`.
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	app := s.getApp(w, r, "get")
 	if app == nil {

@@ -1,0 +1,107 @@
+# CYSTEMD v4 continuous_deployment, converted by `cystemd migrate`.
+# Create with: cystemd app create -f applications.yaml
+---
+apiVersion: cystemd.io/v1alpha1
+kind: Application
+metadata:
+  name: myproject_myapplication-myapplication
+  labels:
+    cystemd.io/migrated-from: v4
+    cystemd.io/v4-selector: myapplication
+spec:
+  project: default
+  source:
+    repoURL: git@git.example.com:platform/deploy.git
+    path: products/myproject/environments/dev/myproject_myapplication
+    targetRevision: master
+    systemd:
+      valuesFile: values.yaml
+      selector: myapplication
+      configKey: .${selector}.services.${selector}.config.[]
+      versionKey: .${selector}.global.image.tag
+      cpuKey: .${selector}.services.${selector}.deployment.resources.limits.cpu
+      memoryKey: .${selector}.services.${selector}.deployment.resources.limits.memory
+      unit: myproject_myapplication
+      serviceConfig: config.yml
+      replicas: 0
+      nodeSelector: myapplication
+      secrets:
+        - vaultPath: kubernetes/myproject/myapplication/myproject-myapplication-dev
+      vaultRole: cystemd-app-myproject_myapplication-myapplication
+  destination: {}
+  syncPolicy:
+    automated:
+      selfHeal: true
+---
+apiVersion: cystemd.io/v1alpha1
+kind: Application
+metadata:
+  name: myproject_myapplication2
+  labels:
+    cystemd.io/migrated-from: v4
+    cystemd.io/v4-selector: myapplication2
+spec:
+  project: default
+  source:
+    repoURL: git@git.example.com:platform/deploy.git
+    path: products/myproject/environments/dev/myproject_myapplication2
+    targetRevision: releasedev
+    systemd:
+      valuesFile: values.yaml
+      selector: myapplication
+      configKey: .${selector}.services.${selector}.config.[]
+      workdir: /srv
+      replicas: 0
+      nodeSelector: myapplication2
+  destination: {}
+---
+apiVersion: cystemd.io/v1alpha1
+kind: Application
+metadata:
+  name: payments-api
+  labels:
+    cystemd.io/migrated-from: v4
+    cystemd.io/v4-selector: myapplication2
+spec:
+  project: default
+  source:
+    repoURL: git@git.example.com:platform/deploy.git
+    path: payments
+    targetRevision: master
+    systemd:
+      valuesFile: values.yaml
+      selector: myapplication2
+      unit: Payments@API
+      replicas: 0
+      nodeSelector: myapplication2
+  destination: {}
+  syncPolicy:
+    automated:
+      selfHeal: true
+---
+apiVersion: cystemd.io/v1alpha1
+kind: Application
+metadata:
+  name: myproject_myapplication-poc
+  labels:
+    cystemd.io/migrated-from: v4
+    cystemd.io/v4-selector: poc
+spec:
+  project: default
+  source:
+    repoURL: git@git.example.com:platform/deploy.git
+    path: products/myproject/environments/poc/myproject_myapplication
+    targetRevision: master
+    systemd:
+      valuesFile: values.yaml
+      selector: poc
+      unit: myproject_myapplication
+      replicas: 0
+      nodeSelector: poc
+      secrets:
+        - vaultPath: kubernetes/myproject/poc
+      vaultRole: cystemd-app-myproject_myapplication-poc
+  destination: {}
+  syncPolicy:
+    automated:
+      selfHeal: true

@@ -59,6 +59,8 @@ type Identity struct {
 	Provider string   `json:"provider"`
 	// IssuedAt is when the session started.
 	IssuedAt time.Time `json:"iat"`
+	// generation is the local account's session generation at login.
+	generation int64
 }
 
 // Claims are the session JWT claims.
@@ -66,6 +68,9 @@ type Claims struct {
 	jwt.RegisteredClaims
 	Groups   []string `json:"groups,omitempty"`
 	Provider string   `json:"provider,omitempty"`
+	// Generation is the local account's session generation (see
+	// store.Account.SessionGeneration).
+	Generation int64 `json:"gen,omitempty"`
 }
 
 // NomadTokenResolver turns a Nomad ACL token into an identity.
@@ -89,22 +94,22 @@ type Options struct {
 
 // Manager issues and verifies sessions.
 type Manager struct {
-	store      *store.Store
-	key        []byte
-	ttl        time.Duration
-	legacy     ed25519.PublicKey
-	nomad      NomadTokenResolver
-	adminOn    bool
-	anonymous  string
-	logger     *slog.Logger
-	throttle   *throttle
-	mtimeCache sync.Map // username → cachedMtime
+	store     *store.Store
+	key       []byte
+	ttl       time.Duration
+	legacy    ed25519.PublicKey
+	nomad     NomadTokenResolver
+	adminOn   bool
+	anonymous string
+	logger    *slog.Logger
+	throttle  *throttle
+	accounts  sync.Map // username → cachedAccount
 }
 
-type cachedMtime struct {
-	mtime   time.Time
-	enabled bool
-	at      time.Time
+type cachedAccount struct {
+	generation int64
+	enabled    bool
+	at         time.Time
 }
 
 // NewManager loads (or creates) the signing key and bootstraps the admin.
@@ -235,7 +240,8 @@ func (m *Manager) Login(ctx context.Context, username, password string) (string,
 		return "", nil, ErrInvalidCredentials
 	}
 	m.throttle.reset(username)
-	id := &Identity{Username: username, Groups: acct.Groups, Provider: ProviderLocal, IssuedAt: time.Now().UTC().Truncate(time.Second)}
+	id := &Identity{Username: username, Groups: acct.Groups, Provider: ProviderLocal, IssuedAt: time.Now().UTC().Truncate(time.Second),
+		generation: acct.SessionGeneration}
 	tok, err := m.issue(id)
 	return tok, id, err
 }
@@ -272,8 +278,9 @@ func (m *Manager) issue(id *Identity) (string, error) {
 			ExpiresAt: jwt.NewNumericDate(id.IssuedAt.Add(m.ttl)),
 			ID:        base64.RawURLEncoding.EncodeToString(jti),
 		},
-		Groups:   id.Groups,
-		Provider: id.Provider,
+		Groups:     id.Groups,
+		Provider:   id.Provider,
+		Generation: id.generation,
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(m.key)
 }
@@ -313,32 +320,33 @@ func (m *Manager) Verify(ctx context.Context, token string) (*Identity, error) {
 		id.IssuedAt = claims.IssuedAt.Time
 	}
 	if id.Provider == ProviderLocal {
-		// A password change (or disabling the account) revokes older sessions.
-		mtime, enabled, err := m.accountState(ctx, id.Username)
-		if err != nil || !enabled || (!mtime.IsZero() && id.IssuedAt.Before(mtime.Truncate(time.Second))) {
+		// A password change (or disabling the account) revokes older
+		// sessions: their generation is behind the account's.
+		gen, enabled, err := m.accountState(ctx, id.Username)
+		if err != nil || !enabled || claims.Generation != gen {
 			return nil, ErrUnauthenticated
 		}
+		id.generation = gen
 	}
 	return id, nil
 }
 
-func (m *Manager) accountState(ctx context.Context, user string) (time.Time, bool, error) {
-	if c, ok := m.mtimeCache.Load(user); ok {
-		cm := c.(cachedMtime)
-		if time.Since(cm.at) < 10*time.Second {
-			return cm.mtime, cm.enabled, nil
+// accountState is a local account's session generation and whether it
+// is enabled, cached for a few seconds (a change reaches the other
+// control plane replicas within that time).
+func (m *Manager) accountState(ctx context.Context, user string) (int64, bool, error) {
+	if c, ok := m.accounts.Load(user); ok {
+		ca := c.(cachedAccount)
+		if time.Since(ca.at) < 10*time.Second {
+			return ca.generation, ca.enabled, nil
 		}
 	}
 	acct, err := m.store.GetAccount(ctx, user)
 	if err != nil {
-		return time.Time{}, false, err
+		return 0, false, err
 	}
-	var mt time.Time
-	if acct.PasswordMtime != nil {
-		mt = *acct.PasswordMtime
-	}
-	m.mtimeCache.Store(user, cachedMtime{mtime: mt, enabled: acct.Enabled, at: time.Now()})
-	return mt, acct.Enabled, nil
+	m.accounts.Store(user, cachedAccount{generation: acct.SessionGeneration, enabled: acct.Enabled, at: time.Now()})
+	return acct.SessionGeneration, acct.Enabled, nil
 }
 
 // FromRequest authenticates a request (bearer token, then session cookie).
@@ -373,9 +381,10 @@ func (m *Manager) UpdatePassword(ctx context.Context, user, current, next string
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC().Add(time.Second)
+	now := time.Now().UTC()
 	acct.PasswordHash, acct.PasswordMtime, acct.MustResetPassword = hash, &now, false
-	m.mtimeCache.Delete(user)
+	acct.SessionGeneration++
+	m.accounts.Delete(user)
 	return m.store.PutAccount(ctx, acct)
 }
 

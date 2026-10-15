@@ -1,0 +1,58 @@
+# A CYSTEMD v4 config.yml exercising what `cystemd migrate` converts.
+version: v4.9.1
+log_level: INFO
+listen_address: ":50080"
+auth:
+  enabled: true
+  public_key_file: /opt/cystemd/jwt.pub
+dnf:
+  makecache_repos: [internal-rpms]
+  makecache_timeout: 90s
+vault:
+  refresh_interval: 10m
+  renewal_floor: 30s
+
+node_pools:
+  - selector: myapplication
+    nodes: [HOST001, host002]
+  - selector: myapplication2
+    nodes: [HOST002]
+  - selector: poc
+    nodes: [HOST009, host001]
+
+continuous_deployment:
+  - service: myproject_myapplication
+    selector: myapplication
+    replica: 1
+    git_branch: master
+    git_values: products/myproject/environments/dev/myproject_myapplication/values.yaml
+    git_values_config_key: .${selector}.services.${selector}.config.[]
+    git_values_version_key: .${selector}.global.image.tag
+    git_values_cpu_key: .${selector}.services.${selector}.deployment.resources.limits.cpu
+    git_values_memory_key: .${selector}.services.${selector}.deployment.resources.limits.memory
+    service_config: config.yml
+    secrets: kubernetes/myproject/myapplication/myproject-myapplication-dev
+    autosync: true
+  - service: myproject_myapplication2
+    selector: myapplication2
+    selectorkey: myapplication
+    git_branch: releasedev
+    git_values: products/myproject/environments/dev/myproject_myapplication2/values.yaml
+    git_values_config_key: .${selector}.services.${selector}.config.[]
+    workdir: /srv
+    autosync: "no"
+  - service: Payments@API
+    selector: myapplication2
+    git_values: payments/values.yaml
+    autosync: 1
+  - service: myproject_myapplication
+    selector: poc
+    replica: 2
+    git_values: products/myproject/environments/poc/myproject_myapplication/values.yaml
+    secrets: /kubernetes/myproject/poc/
+    autosync: "Yes"
+  - service: no_values
+    selector: poc
+  - selector: poc
+    git_values: x/values.yaml
+    unknown_key: 1

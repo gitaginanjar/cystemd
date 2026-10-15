@@ -466,6 +466,9 @@ type Account struct {
 	Capabilities      []string   `json:"capabilities,omitempty"`
 	Groups            []string   `json:"groups,omitempty"`
 	MustResetPassword bool       `json:"mustResetPassword,omitempty"`
+	// SessionGeneration is carried by the account's session tokens; a
+	// password change increments it, which revokes the older sessions.
+	SessionGeneration int64 `json:"sessionGeneration,omitempty"`
 }
 
 // ListAccounts returns every local account.

@@ -5,7 +5,6 @@ package server
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/gitaginanjar/cystemd/internal/store"
@@ -62,7 +61,7 @@ func (s *Server) createProject(r *http.Request, p *v1.AppProject) error {
 		return err
 	}
 	if existing, err := s.Store.GetProject(r.Context(), p.Metadata.Name); err == nil && existing.Metadata.ResourceVersion != "" {
-		return fmt.Errorf("%w: project %q already exists", store.ErrExists, p.Metadata.Name)
+		return statusErr(http.StatusConflict, "project %q already exists", p.Metadata.Name)
 	}
 	if err := s.Store.PutProject(r.Context(), p); err != nil {
 		return err

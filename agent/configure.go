@@ -16,6 +16,7 @@ import (
 	"github.com/hashicorp/nomad/version"
 
 	"github.com/gitaginanjar/cystemd/driver/systemd"
+	cycli "github.com/gitaginanjar/cystemd/internal/cli"
 )
 
 // Build metadata, injected with -ldflags -X main.<name>=… (see Makefile).
@@ -46,11 +47,25 @@ func configure() {
 		})
 }
 
+// cliOptions mount the CYSTEMD commands in the Nomad CLI: the session
+// commands go under "ctl" (Nomad has its own login and version), and
+// without a CYSTEMD context the commands talk to NOMAD_ADDR with
+// NOMAD_TOKEN, where the agent serves the CYSTEMD API.
+func cliOptions() cycli.Options {
+	return cycli.Options{
+		Name:           "cystemd",
+		NomadFallback:  true,
+		DefaultAddress: "http://127.0.0.1:4646",
+		Version:        cystemdVersion,
+		SessionPrefix:  "ctl ",
+	}
+}
+
 // cystemdCommands are the CYSTEMD commands added to the Nomad CLI.
 func cystemdCommands(ui cli.Ui) map[string]cli.CommandFactory {
-	return map[string]cli.CommandFactory{}
+	return cycli.Commands(ui, cliOptions())
 }
 
 func cystemdCommandNames() []string {
-	return nil
+	return cycli.TopLevel(cliOptions())
 }

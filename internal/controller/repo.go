@@ -125,7 +125,7 @@ func (r *RepoService) Manifests(ctx context.Context, app *v1alpha1.Application, 
 	renderApp.Spec.Source = source
 	var out *render.Manifests
 	err = r.Git.Checkout(ctx, source.RepoURL, sha, func(root string) error {
-		dir := filepath.Join(root, filepath.Clean("/" + source.Path))
+		dir := filepath.Join(root, filepath.Clean("/"+source.Path))
 		m, err := renderer.Render(ctx, renderApp, dir)
 		out = m
 		return err

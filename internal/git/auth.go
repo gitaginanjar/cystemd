@@ -24,7 +24,9 @@ import (
 // context does not cover.
 const sshDialTimeout = 30 * time.Second
 
-// isSSH reports whether url uses SSH (ssh:// or scp-like user@host:path).
+// IsSSH reports whether url uses SSH (ssh:// or scp-like user@host:path).
+func IsSSH(url string) bool { return isSSH(url) }
+
 func isSSH(url string) bool {
 	if strings.HasPrefix(url, "ssh://") {
 		return true

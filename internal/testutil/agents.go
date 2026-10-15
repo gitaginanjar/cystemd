@@ -93,18 +93,24 @@ func start(t testing.TB, name string, args []string, ready func(addr string) boo
 	if err := a.cmd.Start(); err != nil {
 		t.Fatalf("start %s: %v", name, err)
 	}
+	exited := make(chan struct{})
+	go func() { _ = a.cmd.Wait(); close(exited) }()
 	t.Cleanup(func() {
 		_ = a.cmd.Process.Signal(os.Interrupt)
-		done := make(chan struct{})
-		go func() { _, _ = a.cmd.Process.Wait(); close(done) }()
 		select {
-		case <-done:
+		case <-exited:
 		case <-time.After(10 * time.Second):
 			_ = a.cmd.Process.Kill()
+			<-exited
 		}
 	})
 	deadline := time.Now().Add(60 * time.Second)
 	for !ready(addr) {
+		select {
+		case <-exited:
+			t.Fatalf("%s exited before becoming ready:\n%s", name, a.Log())
+		default:
+		}
 		if time.Now().After(deadline) {
 			t.Fatalf("%s did not become ready:\n%s", name, a.Log())
 		}
@@ -210,10 +216,9 @@ func StartVault(t testing.TB) (*Agent, string) {
 	if addr := os.Getenv("CYSTEMD_TEST_VAULT_ADDR"); addr != "" {
 		return &Agent{Addr: addr, URL: "http://" + addr, log: &syncBuffer{}}, os.Getenv("CYSTEMD_TEST_VAULT_TOKEN")
 	}
-	p := FreePorts(t, 2)
+	p := FreePorts(t, 1)
 	addr := fmt.Sprintf("127.0.0.1:%d", p[0])
-	args := []string{"server", "-dev", "-dev-root-token-id=" + token,
-		"-dev-listen-address=" + addr, fmt.Sprintf("-dev-cluster-listen-address=127.0.0.1:%d", p[1])}
+	args := []string{"server", "-dev", "-dev-root-token-id=" + token, "-dev-listen-address=" + addr}
 	a := start(t, "vault", args, func(addr string) bool { return httpOK("http://" + addr + "/v1/sys/health") }, addr)
 	return a, token
 }

@@ -1,0 +1,288 @@
+// Copyright 2026 G.G (https://github.com/gitaginanjar)
+// SPDX-License-Identifier: Apache-2.0
+
+package server_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/gitaginanjar/cystemd/internal/auth"
+	"github.com/gitaginanjar/cystemd/internal/config"
+	"github.com/gitaginanjar/cystemd/internal/controller"
+	"github.com/gitaginanjar/cystemd/internal/git"
+	"github.com/gitaginanjar/cystemd/internal/metrics"
+	"github.com/gitaginanjar/cystemd/internal/nomad"
+	"github.com/gitaginanjar/cystemd/internal/rbac"
+	"github.com/gitaginanjar/cystemd/internal/server"
+	"github.com/gitaginanjar/cystemd/internal/store"
+	v1 "github.com/gitaginanjar/cystemd/pkg/apis/v1alpha1"
+)
+
+type harness struct {
+	t      *testing.T
+	srv    *httptest.Server
+	store  *store.Store
+	admin  string // admin bearer token
+	reader string // readonly bearer token
+}
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	cfg.Nomad.Address = "http://127.0.0.1:1" // unreachable: these tests need no Nomad
+	st := store.New(store.NewMemoryKV(), "cystemd")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	am, err := auth.NewManager(ctx, auth.Options{Store: st, AdminEnabled: true, DataDir: cfg.DataDir, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := auth.HashPassword("reader-password")
+	if err := st.PutAccount(ctx, &store.Account{Name: "reader", PasswordHash: hash, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	enforcer, _ := rbac.New("", rbac.RoleReadonly)
+	clusters := nomad.NewClusters()
+	nc, _ := nomad.New(nomad.Config{Address: cfg.Nomad.Address})
+	clusters.Add(v1.InClusterName, nc)
+	gitClient := git.NewClient(git.Options{CacheDir: t.TempDir()})
+	repos := &controller.RepoService{Git: gitClient, Clusters: clusters}
+	s := server.New(server.Options{
+		Config: cfg, Store: st, Auth: am, RBAC: enforcer, Clusters: clusters, Git: gitClient, Repos: repos,
+		Live: &controller.Live{Clusters: clusters, Repos: repos}, Metrics: metrics.New(), Logger: logger,
+		Build: server.BuildInfo{Version: "test", Mode: "standalone"},
+	})
+	h := &harness{t: t, srv: httptest.NewServer(s.Handler()), store: st}
+	t.Cleanup(h.srv.Close)
+	pw, _ := os.ReadFile(filepath.Join(cfg.DataDir, "initial-admin-password"))
+	h.admin = h.login("admin", strings.TrimSpace(string(pw)))
+	h.reader = h.login("reader", "reader-password")
+	return h
+}
+
+func (h *harness) login(user, pw string) string {
+	var out map[string]string
+	code := h.do("POST", "/api/v1/session", "", map[string]string{"username": user, "password": pw}, &out)
+	if code != 200 || out["token"] == "" {
+		h.t.Fatalf("login %s: %d %v", user, code, out)
+	}
+	return out["token"]
+}
+
+func (h *harness) do(method, path, token string, body any, out any) int {
+	h.t.Helper()
+	var rdr io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		rdr = bytes.NewReader(b)
+	}
+	req, _ := http.NewRequest(method, h.srv.URL+path, rdr)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if out != nil {
+		_ = json.NewDecoder(resp.Body).Decode(out)
+	}
+	return resp.StatusCode
+}
+
+func demoApp(name string) *v1.Application {
+	return &v1.Application{
+		Metadata: v1.ObjectMeta{Name: name},
+		Spec: v1.ApplicationSpec{
+			Source: v1.ApplicationSource{RepoURL: "https://git.example.com/ops.git", Path: "apps/" + name},
+		},
+	}
+}
+
+func TestPublicAndAuthenticatedRoutes(t *testing.T) {
+	h := newHarness(t)
+	var settings server.Settings
+	if code := h.do("GET", "/api/v1/settings", "", nil, &settings); code != 200 || settings.AppLabelKey != v1.AppMetaKey {
+		t.Fatalf("settings: %d %+v", code, settings)
+	}
+	if code := h.do("GET", "/api/v1/applications", "", nil, nil); code != 401 {
+		t.Fatalf("unauthenticated list: %d", code)
+	}
+	var info server.UserInfo
+	h.do("GET", "/api/v1/session/userinfo", h.reader, nil, &info)
+	if !info.LoggedIn || info.Username != "reader" || info.IsAdmin {
+		t.Fatalf("reader info = %+v", info)
+	}
+	if code := h.do("POST", "/api/v1/session", "", map[string]string{"username": "admin", "password": "nope"}, nil); code != 401 {
+		t.Fatalf("bad login: %d", code)
+	}
+}
+
+func TestApplicationLifecycleAndRBAC(t *testing.T) {
+	h := newHarness(t)
+	// The reader cannot create.
+	if code := h.do("POST", "/api/v1/applications", h.reader, demoApp("web"), nil); code != 403 {
+		t.Fatalf("reader create: %d", code)
+	}
+	var created v1.Application
+	if code := h.do("POST", "/api/v1/applications", h.admin, demoApp("web"), &created); code != 200 {
+		t.Fatalf("admin create: %d", code)
+	}
+	if created.Spec.Project != "default" || created.APIVersion != v1.APIVersion {
+		t.Fatalf("defaults not applied: %+v", created)
+	}
+	if code := h.do("POST", "/api/v1/applications", h.admin, demoApp("web"), nil); code != 409 {
+		t.Fatalf("duplicate create: %d", code)
+	}
+	bad := demoApp("Bad_Name")
+	if code := h.do("POST", "/api/v1/applications", h.admin, bad, nil); code != 400 {
+		t.Fatalf("invalid name: %d", code)
+	}
+
+	// The reader sees it but cannot sync.
+	var list server.ApplicationList
+	h.do("GET", "/api/v1/applications", h.reader, nil, &list)
+	if len(list.Items) != 1 {
+		t.Fatalf("reader list = %d", len(list.Items))
+	}
+	if code := h.do("POST", "/api/v1/applications/web/sync", h.reader, map[string]any{}, nil); code != 403 {
+		t.Fatalf("reader sync: %d", code)
+	}
+
+	// Admin sync records the operation; a second one conflicts.
+	var synced v1.Application
+	if code := h.do("POST", "/api/v1/applications/web/sync", h.admin, map[string]any{"prune": true}, &synced); code != 200 {
+		t.Fatalf("sync: %d", code)
+	}
+	if synced.Operation == nil || synced.Operation.InitiatedBy.Username != "admin" || !synced.Operation.Sync.Prune {
+		t.Fatalf("operation = %+v", synced.Operation)
+	}
+	if code := h.do("POST", "/api/v1/applications/web/sync", h.admin, map[string]any{}, nil); code != 409 {
+		t.Fatalf("concurrent sync: %d", code)
+	}
+	// Terminating a not-yet-started operation clears it.
+	if code := h.do("DELETE", "/api/v1/applications/web/operation", h.admin, map[string]any{}, nil); code != 200 {
+		t.Fatalf("terminate: %d", code)
+	}
+	app, _ := h.store.GetApplication(context.Background(), "web")
+	if app.Operation != nil {
+		t.Fatal("operation not cleared")
+	}
+
+	// A stale resourceVersion is a conflict; the current one updates.
+	created.Spec.SyncPolicy = &v1.SyncPolicy{Automated: &v1.SyncPolicyAutomated{}}
+	if code := h.do("PUT", "/api/v1/applications/web", h.admin, created, nil); code != 409 {
+		t.Fatalf("stale update: %d", code)
+	}
+	var current v1.Application
+	h.do("GET", "/api/v1/applications/web", h.admin, nil, &current)
+	current.Spec.SyncPolicy = &v1.SyncPolicy{Automated: &v1.SyncPolicyAutomated{}}
+	if code := h.do("PUT", "/api/v1/applications/web", h.admin, current, nil); code != 200 {
+		t.Fatalf("update: %d", code)
+	}
+
+	// Rollback is refused while auto-sync is on.
+	if code := h.do("POST", "/api/v1/applications/web/rollback", h.admin, map[string]any{"id": 0}, nil); code != 400 {
+		t.Fatalf("rollback with auto-sync: %d", code)
+	}
+
+	// Cascade delete marks the app for the controller's finalizer.
+	if code := h.do("DELETE", "/api/v1/applications/web?cascade=true", h.admin, map[string]any{}, nil); code != 200 {
+		t.Fatalf("delete: %d", code)
+	}
+	app, _ = h.store.GetApplication(context.Background(), "web")
+	if app.Metadata.DeletionTimestamp == nil || !app.Metadata.HasFinalizer(v1.ResourcesFinalizer) {
+		t.Fatalf("cascade delete not requested: %+v", app.Metadata)
+	}
+}
+
+func TestProjectRestrictions(t *testing.T) {
+	h := newHarness(t)
+	proj := v1.AppProject{
+		Metadata: v1.ObjectMeta{Name: "team-a"},
+		Spec: v1.AppProjectSpec{
+			SourceRepos:  []string{"https://git.example.com/team-a/*"},
+			Destinations: []v1.ApplicationDestination{{Name: "in-cluster", Namespace: "team-a"}},
+		},
+	}
+	if code := h.do("POST", "/api/v1/projects", h.admin, proj, nil); code != 200 {
+		t.Fatalf("create project: %d", code)
+	}
+	app := demoApp("svc")
+	app.Spec.Project = "team-a"
+	if code := h.do("POST", "/api/v1/applications", h.admin, app, nil); code != 400 {
+		t.Fatalf("source outside project accepted: %d", code)
+	}
+	app.Spec.Source.RepoURL = "https://git.example.com/team-a/svc.git"
+	if code := h.do("POST", "/api/v1/applications", h.admin, app, nil); code != 400 {
+		t.Fatalf("destination outside project accepted: %d", code)
+	}
+	app.Spec.Destination.Namespace = "team-a"
+	if code := h.do("POST", "/api/v1/applications", h.admin, app, nil); code != 200 {
+		t.Fatalf("valid app refused: %d", code)
+	}
+	if code := h.do("DELETE", "/api/v1/projects/team-a", h.admin, map[string]any{}, nil); code != 400 {
+		t.Fatalf("project in use deleted: %d", code)
+	}
+}
+
+func TestCookieWritesMustBeJSON(t *testing.T) {
+	h := newHarness(t)
+	// A cross-site form post (cookie, form content type) is refused.
+	req, _ := http.NewRequest("POST", h.srv.URL+"/api/v1/applications", strings.NewReader("metadata.name=x"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: h.admin})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("form post with cookie: %d", resp.StatusCode)
+	}
+}
+
+func TestPasswordChange(t *testing.T) {
+	h := newHarness(t)
+	if code := h.do("PUT", "/api/v1/account/password", h.reader, map[string]string{"currentPassword": "wrong", "newPassword": "something-long"}, nil); code != 400 {
+		t.Fatalf("wrong current password: %d", code)
+	}
+	if code := h.do("PUT", "/api/v1/account/password", h.reader, map[string]string{"currentPassword": "reader-password", "newPassword": "something-long"}, nil); code != 200 {
+		t.Fatalf("change: %d", code)
+	}
+	h.login("reader", "something-long")
+}
+
+func TestHealthAndVersion(t *testing.T) {
+	h := newHarness(t)
+	var bi server.BuildInfo
+	if code := h.do("GET", "/api/version", "", nil, &bi); code != 200 || bi.Version != "test" {
+		t.Fatalf("version: %d %+v", code, bi)
+	}
+	resp, err := http.Get(h.srv.URL + "/healthz")
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("healthz: %v %v", err, resp)
+	}
+	resp.Body.Close()
+	resp, _ = http.Get(h.srv.URL + "/metrics")
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(b), "cystemd_http_requests_total") {
+		t.Fatal("metrics missing")
+	}
+}

@@ -1,0 +1,1137 @@
+// Copyright 2026 G.G (https://github.com/gitaginanjar)
+// SPDX-License-Identifier: Apache-2.0
+
+package views
+
+import (
+	"strconv"
+	"strings"
+
+	"github.com/gitaginanjar/cystemd/internal/diff"
+	v1 "github.com/gitaginanjar/cystemd/pkg/apis/v1alpha1"
+)
+
+// EmptyPanel closes any open panel.
+templ EmptyPanel() {
+}
+
+templ panelError(msg string) {
+	if msg != "" {
+		<div class="alert alert--error mb" role="alert">
+			@StatusIcon("Failed")
+			<pre class="mono">{ msg }</pre>
+		</div>
+	}
+}
+
+templ closeButton(href, label string) {
+	<a class="btn btn--outline" href={ SafeURL(href) } hx-get={ href } hx-target="#panel" hx-push-url="true">{ label }</a>
+}
+
+// ─── application details ────────────────────────────────────────────────
+
+templ AppDetailsPanelView(d AppDetailsPanel) {
+	@PanelFrame(d.App.Metadata.Name, "apps", d.CloseHref, false, appDetailsActions(d)) {
+		@PanelTabs(d.Tabs)
+		@panelError(d.Error)
+		switch d.Tab {
+			case "parameters":
+				@appParameters(d.App)
+			case "manifest":
+				@appManifestTab(d)
+			case "events":
+				@EventsTable(d.Events)
+			default:
+				if d.Edit {
+					<form class="form" hx-post={ AppHref(d.App.Metadata.Name) + "/spec" } hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+						<input type="hidden" name="close" value={ d.CloseHref }/>
+						<input type="hidden" name="resourceVersion" value={ d.Form.ResourceVersion }/>
+						@AppFormFields(d.Form, d.Options, false)
+						<div class="flex">
+							<button class="btn" type="submit">
+								@Icon("check")
+								Save
+							</button>
+							@closeButton(d.ViewHref, "Cancel")
+						</div>
+					</form>
+				} else {
+					@appSummary(d)
+				}
+		}
+	}
+}
+
+templ appDetailsActions(d AppDetailsPanel) {
+	if d.Perms.Update && d.Tab == "summary" && !d.Edit {
+		<a class="btn btn--outline" href={ SafeURL(d.EditHref) } hx-get={ d.EditHref } hx-target="#panel" hx-push-url="true">
+			@Icon("edit")
+			Edit
+		</a>
+	}
+}
+
+templ appSummary(d AppDetailsPanel) {
+	{{ a := d.App }}
+	<div class="white-box">
+		<div class="kv">
+			<div class="kv__key">Project</div>
+			<div><a href={ SafeURL("/ui/settings/projects/" + a.Spec.Project) }>{ a.Spec.Project }</a></div>
+			<div class="kv__key">Labels</div>
+			<div class="tags">
+				for _, l := range Labels(a.Metadata.Labels) {
+					<span class="tag">{ l }</span>
+				}
+			</div>
+			if len(a.Metadata.Annotations) > 0 {
+				<div class="kv__key">Annotations</div>
+				<div class="tags">
+					for _, l := range Labels(a.Metadata.Annotations) {
+						<span class="tag" title={ l }>{ l }</span>
+					}
+				</div>
+			}
+			<div class="kv__key">Cluster</div>
+			<div>{ Destination(a.Spec.Destination) }</div>
+			<div class="kv__key">Namespace</div>
+			<div>{ a.Spec.Destination.NamespaceOrDefault() }</div>
+			<div class="kv__key">Created at</div>
+			<div>{ TimestampPtr(a.Metadata.CreationTimestamp) } <span class="faint">({ AgoPtr(a.Metadata.CreationTimestamp) })</span></div>
+			<div class="kv__key">Repo URL</div>
+			<div>
+				if web := RepoWebURL(a.Spec.Source.RepoURL); web != "" {
+					<a href={ ExternalURL(web) } target="_blank" rel="noopener noreferrer" hx-boost="false">
+						{ a.Spec.Source.RepoURL }
+						@Icon("external", "icon--sm")
+					</a>
+				} else {
+					{ a.Spec.Source.RepoURL }
+				}
+			</div>
+			<div class="kv__key">Target revision</div>
+			<div>{ a.Spec.Source.Revision() }</div>
+			<div class="kv__key">Path</div>
+			<div>{ a.Spec.Source.Path }</div>
+			<div class="kv__key">Source type</div>
+			<div>{ string(a.Spec.Source.Type()) }</div>
+			<div class="kv__key">Sync policy</div>
+			<div class="flex flex-wrap">
+				<span>{ AutoSyncText(a) }</span>
+				if d.Perms.Update {
+					if a.Spec.SyncPolicy.IsAutomated() {
+						<button class="btn btn--sm btn--outline" type="button" hx-post={ AppHref(a.Metadata.Name) + "/autosync?enable=false" } hx-target="#panel" hx-confirm="Disable auto-sync? Changes in Git will no longer be applied automatically.">Disable auto-sync</button>
+					} else {
+						<button class="btn btn--sm btn--outline" type="button" hx-post={ AppHref(a.Metadata.Name) + "/autosync?enable=true" } hx-target="#panel" hx-confirm="Enable auto-sync? The application will be synced whenever Git changes.">Enable auto-sync</button>
+					}
+				}
+			</div>
+			if a.Spec.SyncPolicy != nil && len(a.Spec.SyncPolicy.SyncOptions) > 0 {
+				<div class="kv__key">Sync options</div>
+				<div class="tags">
+					for _, o := range a.Spec.SyncPolicy.SyncOptions {
+						<span class="tag">{ o }</span>
+					}
+				</div>
+			}
+			if a.Spec.SyncPolicy != nil && a.Spec.SyncPolicy.Retry != nil {
+				<div class="kv__key">Retry</div>
+				<div>limit { strconv.FormatInt(a.Spec.SyncPolicy.Retry.Limit, 10) }</div>
+			}
+			<div class="kv__key">Status</div>
+			<div>
+				@HealthStatus(HealthOf(a), a.Status.Health.Message)
+				@SyncStatus(SyncOf(a))
+			</div>
+			if len(a.Status.Summary.Images) > 0 {
+				<div class="kv__key">Images / packages</div>
+				<div class="tags">
+					for _, i := range a.Status.Summary.Images {
+						<span class="tag mono" title={ i }>{ i }</span>
+					}
+				</div>
+			}
+			if len(a.Status.Summary.ExternalURLs) > 0 {
+				<div class="kv__key">Links</div>
+				<div class="flex flex-wrap">
+					for _, u := range a.Status.Summary.ExternalURLs {
+						<a href={ ExternalURL(u) } target="_blank" rel="noopener noreferrer" hx-boost="false">
+							{ u }
+							@Icon("external", "icon--sm")
+						</a>
+					}
+				</div>
+			}
+			for _, i := range a.Spec.Info {
+				<div class="kv__key">{ i.Name }</div>
+				<div>{ i.Value }</div>
+			}
+			<div class="kv__key">Status badge</div>
+			<div><img src={ "/api/badge?name=" + queryEscape(a.Metadata.Name) } alt="status badge" height="20"/></div>
+		</div>
+	</div>
+}
+
+templ appParameters(a *v1.Application) {
+	<div class="white-box">
+		<div class="white-box__title">{ string(a.Spec.Source.Type()) } source</div>
+		<div class="kv">
+			if s := a.Spec.Source.Systemd; s != nil {
+				@kvRow("Values file", or(s.ValuesFile, "values.yaml"))
+				@kvRow("Selector", s.Selector)
+				@kvRow("Config key", s.ConfigKey)
+				@kvRow("Version key", s.VersionKey)
+				@kvRow("CPU key", s.CPUKey)
+				@kvRow("Memory key", s.MemoryKey)
+				@kvRow("Unit", or(s.Unit, a.Metadata.Name))
+				@kvRow("Package", s.Package)
+				@kvRow("Service config", s.ServiceConfig)
+				@kvRow("Workdir", s.Workdir)
+				@kvRow("Replicas", replicasText(s.Replicas))
+				@kvRow("Node pool", s.NodePool)
+				@kvRow("Node selector", s.NodeSelector)
+				@kvRow("Datacenters", strings.Join(s.Datacenters, ", "))
+				@kvRow("Secrets delivery", s.SecretsDelivery)
+				@kvRow("Vault role", s.VaultRole)
+				@kvRow("Config delivery", s.ConfigDelivery)
+				@kvRow("Change mode", s.ChangeMode)
+				for _, sec := range s.Secrets {
+					@kvRow("Secret", sec.VaultPath+" → "+or(sec.Destination, ".env"))
+				}
+				if s.Service != nil {
+					@kvRow("Service", or(s.Service.Name, a.Metadata.Name)+" :"+strconv.Itoa(s.Service.Port))
+				}
+			} else {
+				{{ n := a.Spec.Source.Nomad }}
+				if n == nil {
+					{{ n = &v1.NomadSource{} }}
+				}
+				@kvRow("Job files", or(strings.Join(n.Files, ", "), "*.nomad.hcl, *.nomad, *.nomad.json"))
+				@kvRow("Variable files", strings.Join(n.VarFiles, ", "))
+				for _, k := range SortedKeys(n.Vars) {
+					@kvRow("var."+k, n.Vars[k])
+				}
+				@kvRow("Consul keys file", n.ConsulKV)
+			}
+		</div>
+	</div>
+}
+
+templ kvRow(key, value string) {
+	if value != "" {
+		<div class="kv__key">{ key }</div>
+		<div class="mono">{ value }</div>
+	}
+}
+
+func or(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
+func replicasText(r *int) string {
+	if r == nil {
+		return "1"
+	}
+	if *r == 0 {
+		return "every eligible node (system job)"
+	}
+	return strconv.Itoa(*r)
+}
+
+templ appManifestTab(d AppDetailsPanel) {
+	if d.Edit {
+		<form class="form" hx-post={ AppHref(d.App.Metadata.Name) + "/manifest" } hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+			<input type="hidden" name="close" value={ d.CloseHref }/>
+			<textarea class="textarea textarea--code" name="yaml" spellcheck="false" aria-label="Application manifest">{ d.Manifest }</textarea>
+			<div class="flex">
+				<button class="btn" type="submit">
+					@Icon("check")
+					Save
+				</button>
+				@closeButton(d.ViewHref, "Cancel")
+			</div>
+		</form>
+	} else {
+		if d.Perms.Update {
+			<div class="flex mb">
+				<a class="btn btn--outline" href={ SafeURL(d.EditHref) } hx-get={ d.EditHref } hx-target="#panel" hx-push-url="true">
+					@Icon("edit")
+					Edit
+				</a>
+				<span class="muted small">The status is managed by the controller and not shown here.</span>
+			</div>
+		}
+		@YAML(d.Manifest)
+	}
+}
+
+// EventsTable lists Application events.
+templ EventsTable(events []v1.Event) {
+	if len(events) == 0 {
+		<div class="empty white-box">
+			@Icon("history", "empty__icon")
+			<div class="empty__title">No events</div>
+		</div>
+	} else {
+		<table class="table table--compact">
+			<thead>
+				<tr>
+					<th>Type</th>
+					<th>Reason</th>
+					<th>Message</th>
+					<th>Count</th>
+					<th>Last seen</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, e := range events {
+					<tr>
+						<td class="nowrap">
+							if e.Type == "Warning" {
+								@StatusIcon("Warning", "icon--sm")
+							} else {
+								@StatusIcon("Synced", "icon--sm")
+							}
+							{ e.Type }
+						</td>
+						<td class="nowrap bold">{ e.Reason }</td>
+						<td>
+							{ e.Message }
+							if e.Username != "" {
+								<span class="faint small">· { e.Username }</span>
+							}
+						</td>
+						<td>{ Itoa(max(e.Count, 1)) }</td>
+						<td class="nowrap" title={ Timestamp(e.LastSeen) }>{ Ago(e.LastSeen) }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+// ─── application form ───────────────────────────────────────────────────
+
+// AppFormFields are the fields of the new-application and edit forms.
+templ AppFormFields(f AppForm, o FormOptions, isNew bool) {
+	<div class="form-section">
+		<div class="form-section__title">General</div>
+		<div class="form-grid">
+			<label class="field">
+				<span class="field__label">Application name</span>
+				<input class="input" name="name" value={ f.Name } required pattern="[a-z0-9]([-a-z0-9.]*[a-z0-9])?" maxlength="63" readonly?={ !isNew } autocomplete="off" placeholder="my-service"/>
+			</label>
+			<label class="field">
+				<span class="field__label">Project name</span>
+				<select class="select" name="project">
+					for _, p := range o.Projects {
+						<option value={ p } selected?={ p == f.Project }>{ p }</option>
+					}
+				</select>
+			</label>
+			<label class="field field--wide">
+				<span class="field__label">Labels</span>
+				<textarea class="textarea" name="labels" rows="2" placeholder="team=payments">{ f.Labels }</textarea>
+				<span class="field__help">One key=value per line.</span>
+			</label>
+		</div>
+	</div>
+	<div class="form-section">
+		<div class="form-section__title">Sync policy</div>
+		<div class="form-grid">
+			<label class="field">
+				<span class="field__label">Sync policy</span>
+				<select class="select" name="syncPolicy">
+					<option value="manual" selected?={ !f.Automated }>Manual</option>
+					<option value="automated" selected?={ f.Automated }>Automatic</option>
+				</select>
+			</label>
+		</div>
+		<div class="checks mt">
+			<label class="check check--upper" title="With automatic sync: delete jobs and keys removed from Git">
+				<input type="checkbox" name="prune" value="true" checked?={ f.Prune }/>
+				Prune resources
+			</label>
+			<label class="check check--upper" title="With automatic sync: revert changes made outside Git">
+				<input type="checkbox" name="selfHeal" value="true" checked?={ f.SelfHeal }/>
+				Self heal
+			</label>
+		</div>
+		<div class="field__label mt mb">Sync options</div>
+		<div class="checks">
+			for _, c := range SyncOptionChoices {
+				<label class="check check--upper" title={ c.Help }>
+					<input type="checkbox" name="syncOption" value={ c.Option } checked?={ f.SyncOptions[c.Option] }/>
+					{ c.Label }
+				</label>
+			}
+		</div>
+	</div>
+	<div class="form-section">
+		<div class="form-section__title">Source</div>
+		<div class="form-grid">
+			<label class="field field--wide">
+				<span class="field__label">Repository URL</span>
+				<input class="input" name="repoURL" value={ f.RepoURL } list="repo-list" required autocomplete="off" placeholder="https://git.example.com/org/deploy.git"/>
+				<datalist id="repo-list">
+					for _, r := range o.Repos {
+						<option value={ r }></option>
+					}
+				</datalist>
+			</label>
+			<label class="field">
+				<span class="field__label">Revision</span>
+				<input class="input" name="targetRevision" value={ f.Revision } list="rev-list" autocomplete="off" placeholder="HEAD" hx-get="/ui/repositories/refs" hx-trigger="focus" hx-include="[name=repoURL]" hx-target="#rev-list" hx-swap="outerHTML" hx-indicator="#quiet"/>
+				<datalist id="rev-list"></datalist>
+				<span class="field__help">Branch, tag or commit.</span>
+			</label>
+			<label class="field">
+				<span class="field__label">Path</span>
+				<input class="input" name="path" value={ f.Path } autocomplete="off" placeholder="apps/my-service"/>
+			</label>
+		</div>
+	</div>
+	<div class="form-section">
+		<div class="form-section__title">Destination</div>
+		<div class="form-grid">
+			<label class="field">
+				<span class="field__label">Cluster name</span>
+				<select class="select" name="destName">
+					for _, c := range o.Clusters {
+						<option value={ c } selected?={ c == f.DestName || (f.DestName == "" && c == v1.InClusterName) }>{ c }</option>
+					}
+				</select>
+			</label>
+			<label class="field">
+				<span class="field__label">Namespace</span>
+				<input class="input" name="destNamespace" value={ f.DestNamespace } placeholder="default" autocomplete="off"/>
+			</label>
+			<label class="field">
+				<span class="field__label">Region</span>
+				<input class="input" name="destRegion" value={ f.DestRegion } placeholder="cluster default" autocomplete="off"/>
+			</label>
+		</div>
+	</div>
+	<div class="form-section source-type">
+		<div class="form-section__title">Source type</div>
+		<div class="checks">
+			<label class="check">
+				<input type="radio" name="sourceType" value="Nomad" checked?={ f.SourceType != "Systemd" }/>
+				Nomad jobspecs
+			</label>
+			<label class="check">
+				<input type="radio" name="sourceType" value="Systemd" checked?={ f.SourceType == "Systemd" }/>
+				systemd service from a values file
+			</label>
+		</div>
+		<div class="form-grid mt source-type__nomad">
+			<label class="field">
+				<span class="field__label">Job files</span>
+				<input class="input mono" name="nomadFiles" value={ f.NomadFiles } placeholder="*.nomad.hcl, *.nomad, *.nomad.json"/>
+				<span class="field__help">Glob patterns relative to the path, comma separated.</span>
+			</label>
+			<label class="field">
+				<span class="field__label">Variable files</span>
+				<input class="input mono" name="nomadVarFiles" value={ f.NomadVarFiles } placeholder="prod.vars.hcl"/>
+				<span class="field__help">HCL2 variable files, later ones win.</span>
+			</label>
+			<label class="field">
+				<span class="field__label">Consul keys file</span>
+				<input class="input mono" name="nomadConsulKV" value={ f.NomadConsulKV } placeholder="consul-kv.yaml"/>
+			</label>
+			<label class="field field--wide">
+				<span class="field__label">Variables</span>
+				<textarea class="textarea" name="nomadVars" rows="3" placeholder="image_tag=1.4.2">{ f.NomadVars }</textarea>
+				<span class="field__help">One name=value per line; overrides the variable files.</span>
+			</label>
+		</div>
+		<div class="form-grid mt source-type__systemd">
+			@textField("Values file", "systemdValuesFile", f.SystemdValuesFile, "values.yaml", "Relative to the path.")
+			@textField("Selector", "systemdSelector", f.SystemdSelector, "prod", "Replaces ${selector} in the keys below.")
+			@textField("Config key", "systemdConfigKey", f.SystemdConfigKey, ".config", "yq-style path of the service configuration.")
+			@textField("Version key", "systemdVersionKey", f.SystemdVersionKey, ".image.tag", "Package version.")
+			@textField("CPU key", "systemdCPUKey", f.SystemdCPUKey, ".resources.limits.cpu", "")
+			@textField("Memory key", "systemdMemoryKey", f.SystemdMemoryKey, ".resources.limits.memory", "")
+			@textField("Unit", "systemdUnit", f.SystemdUnit, "my-service.service", "Default: the application name.")
+			@textField("Package", "systemdPackage", f.SystemdPackage, "my-service", "Default: the unit without .service.")
+			@textField("Service config file", "systemdServiceConfig", f.SystemdServiceConfig, "target.config.yml", "")
+			@textField("Workdir", "systemdWorkdir", f.SystemdWorkdir, "/opt", "")
+			@textField("Replicas", "systemdReplicas", f.SystemdReplicas, "1", "0 runs on every eligible node.")
+			@textField("Node pool", "systemdNodePool", f.SystemdNodePool, "default", "")
+			@textField("Node selector", "systemdNodeSelector", f.SystemdNodeSelector, "web", "Nodes with meta cystemd_selector_<name>=true.")
+			@textField("Datacenters", "systemdDatacenters", f.SystemdDatacenters, "dc1, dc2", "")
+			<label class="field">
+				<span class="field__label">Secrets delivery</span>
+				<select class="select" name="systemdSecretsDelivery">
+					<option value="" selected?={ f.SystemdSecretsDelivery == "" }>Nomad (native Vault integration)</option>
+					<option value="vault-agent" selected?={ f.SystemdSecretsDelivery == "vault-agent" }>Vault Agent sidecar</option>
+				</select>
+			</label>
+			@textField("Vault role", "systemdVaultRole", f.SystemdVaultRole, "cystemd-workloads", "")
+			<label class="field">
+				<span class="field__label">Config delivery</span>
+				<select class="select" name="systemdConfigDelivery">
+					<option value="" selected?={ f.SystemdConfigDelivery == "" }>Automatic</option>
+					<option value="consul" selected?={ f.SystemdConfigDelivery == "consul" }>Consul key (restart in place)</option>
+					<option value="inline" selected?={ f.SystemdConfigDelivery == "inline" }>Inline in the job</option>
+				</select>
+			</label>
+			<label class="field">
+				<span class="field__label">On change</span>
+				<select class="select" name="systemdChangeMode">
+					<option value="" selected?={ f.SystemdChangeMode == "" }>Restart</option>
+					<option value="signal" selected?={ f.SystemdChangeMode == "signal" }>Signal</option>
+					<option value="noop" selected?={ f.SystemdChangeMode == "noop" }>Nothing</option>
+				</select>
+			</label>
+			@textField("Service port", "systemdServicePort", f.SystemdServicePort, "8080", "Registers the unit in Consul.")
+			@textField("Service name", "systemdServiceName", f.SystemdServiceName, "", "Default: the application name.")
+			<label class="field">
+				<span class="field__label">Health check</span>
+				<select class="select" name="systemdCheckType">
+					<option value="" selected?={ f.SystemdCheckType == "" }>None</option>
+					<option value="http" selected?={ f.SystemdCheckType == "http" }>HTTP</option>
+					<option value="tcp" selected?={ f.SystemdCheckType == "tcp" }>TCP</option>
+				</select>
+			</label>
+			@textField("Check path", "systemdCheckPath", f.SystemdCheckPath, "/healthz", "For HTTP checks.")
+			<label class="field field--wide">
+				<span class="field__label">Vault secrets</span>
+				<textarea class="textarea" name="systemdSecrets" rows="3" placeholder="kv/myproject/my-service:.env">{ f.SystemdSecrets }</textarea>
+				<span class="field__help">One Vault KV path per line, optionally :env-file (default .env).</span>
+			</label>
+		</div>
+	</div>
+}
+
+templ textField(label, name, value, placeholder, help string) {
+	<label class="field">
+		<span class="field__label">{ label }</span>
+		<input class="input" name={ name } value={ value } placeholder={ placeholder } autocomplete="off"/>
+		if help != "" {
+			<span class="field__help">{ help }</span>
+		}
+	</label>
+}
+
+// RefOptions is the revision datalist filled from the repository.
+templ RefOptions(branches, tags []string) {
+	<datalist id="rev-list">
+		<option value="HEAD"></option>
+		for _, b := range branches {
+			<option value={ b }>branch</option>
+		}
+		for _, t := range tags {
+			<option value={ t }>tag</option>
+		}
+	</datalist>
+}
+
+// NewAppPanelView is the NEW APP panel.
+templ NewAppPanelView(p NewAppPanel) {
+	@PanelFrame("Create application", "plus", p.CloseHref, false, newAppActions(p)) {
+		@panelError(p.Error)
+		<form id="new-app" class="form" hx-post="/ui/applications" hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+			<input type="hidden" name="mode" value={ p.Mode }/>
+			<input type="hidden" name="close" value={ p.CloseHref }/>
+			if p.Mode == "yaml" {
+				<textarea class="textarea textarea--code" name="yaml" spellcheck="false" aria-label="Application manifest">{ p.YAML }</textarea>
+			} else {
+				@AppFormFields(p.Form, p.Options, true)
+			}
+			<div class="flex">
+				<button class="btn" type="submit">
+					@Icon("plus")
+					Create
+				</button>
+				@closeButton(p.CloseHref, "Cancel")
+			</div>
+		</form>
+	}
+}
+
+templ newAppActions(p NewAppPanel) {
+	if p.Mode == "yaml" {
+		<button class="btn btn--outline" type="button" hx-post="/ui/applications/new/form" hx-include="#new-app" hx-target="#panel">
+			@Icon("list")
+			Edit as form
+		</button>
+	} else {
+		<button class="btn btn--outline" type="button" hx-post="/ui/applications/new/yaml" hx-include="#new-app" hx-target="#panel">
+			@Icon("edit")
+			Edit as YAML
+		</button>
+	}
+}
+
+// ─── diff ───────────────────────────────────────────────────────────────
+
+templ DiffPanelView(p DiffPanel) {
+	@PanelFrame(p.App.Metadata.Name+" — diff", "diff", p.CloseHref, false, diffActions(p)) {
+		@panelError(p.Error)
+		if p.Error == "" && len(p.Diffs) == 0 {
+			<div class="empty white-box">
+				@StatusIcon("Synced", "empty__icon")
+				<div class="empty__title">No resources</div>
+			</div>
+		}
+		{{ changed := 0 }}
+		for _, d := range p.Diffs {
+			if d.Modified {
+				{{ changed++ }}
+				@resourceDiff(d)
+			}
+		}
+		if changed == 0 && len(p.Diffs) > 0 {
+			<div class="alert alert--info mb">
+				@StatusIcon("Synced")
+				<div>The live state matches Git: { Plural(len(p.Diffs), "resource") }, no differences.</div>
+			</div>
+		}
+		for _, d := range p.Diffs {
+			if !d.Modified {
+				<div class="diff">
+					<div class="diff__header">
+						@StatusIcon("Synced", "icon--sm")
+						@Icon(KindIcon(d.Kind), "icon--sm")
+						<span>{ d.Kind }</span>
+						<span class="mono">{ resourceName(d.Namespace, d.Name) }</span>
+						<span class="right faint small">in sync</span>
+					</div>
+				</div>
+			}
+		}
+	}
+}
+
+templ diffActions(p DiffPanel) {
+	<label class="check check--upper">
+		<input type="checkbox" name="compact" value="true" checked?={ p.Compact } hx-get={ p.ToggleURL } hx-target="#panel" hx-push-url="true" hx-trigger="change"/>
+		Compact diff
+	</label>
+}
+
+func resourceName(ns, name string) string {
+	if ns == "" {
+		return name
+	}
+	return ns + "/" + name
+}
+
+templ resourceDiff(d ResourceDiff) {
+	<div class="diff">
+		<div class="diff__header">
+			@StatusIcon("OutOfSync", "icon--sm")
+			@Icon(KindIcon(d.Kind), "icon--sm")
+			<span>{ d.Kind }</span>
+			<span class="mono">{ resourceName(d.Namespace, d.Name) }</span>
+			if d.Pruning {
+				<span class="pill" style="background: var(--degraded)">requires pruning</span>
+			} else if d.Missing {
+				<span class="pill" style="background: var(--missing)">missing</span>
+			}
+		</div>
+		@DiffLines(d.Lines)
+		if d.PlanDiff != "" {
+			<details class="diff__plan">
+				<summary class="diff__header small">Nomad plan</summary>
+				<pre class="code code--wrap">{ d.PlanDiff }</pre>
+			</details>
+		}
+	</div>
+}
+
+// DiffLines renders a structured diff.
+templ DiffLines(lines []diff.Line) {
+	if len(lines) == 0 {
+		<div class="diff__empty">No line differences (the Nomad plan reports field changes only).</div>
+	} else {
+		<div class="diff__body">
+			for _, l := range lines {
+				switch l.Op {
+					case '@':
+						<div class="diff__line diff__line--hunk"><span class="diff__ln"></span><span class="diff__ln"></span><span class="diff__sign"></span><span class="diff__text">{ l.Text }</span></div>
+					case '+':
+						<div class="diff__line diff__line--add"><span class="diff__ln"></span><span class="diff__ln">{ ln(l.B) }</span><span class="diff__sign">+</span><span class="diff__text">{ l.Text }</span></div>
+					case '-':
+						<div class="diff__line diff__line--del"><span class="diff__ln">{ ln(l.A) }</span><span class="diff__ln"></span><span class="diff__sign">-</span><span class="diff__text">{ l.Text }</span></div>
+					default:
+						<div class="diff__line"><span class="diff__ln">{ ln(l.A) }</span><span class="diff__ln">{ ln(l.B) }</span><span class="diff__sign"></span><span class="diff__text">{ l.Text }</span></div>
+				}
+			}
+		</div>
+	}
+}
+
+func ln(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
+}
+
+// ─── sync ───────────────────────────────────────────────────────────────
+
+templ SyncPanelView(p SyncPanel) {
+	@PanelFrame("Synchronize "+p.App.Metadata.Name, "sync", p.CloseHref, true, nil) {
+		@panelError(p.Error)
+		<form class="form" hx-post={ AppHref(p.App.Metadata.Name) + "/sync" } hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+			<input type="hidden" name="close" value={ p.CloseHref }/>
+			<div class="form-section">
+				<div class="form-grid">
+					<label class="field">
+						<span class="field__label">Revision</span>
+						<input class="input" name="revision" value={ p.App.Spec.Source.Revision() } autocomplete="off"/>
+						<span class="field__help">Sync once to another branch, tag or commit.</span>
+					</label>
+				</div>
+				<div class="checks mt">
+					<label class="check check--upper" title="Delete jobs and keys that are no longer in Git">
+						<input type="checkbox" name="prune" value="true" checked?={ p.App.Spec.SyncPolicy.IsAutomated() && p.App.Spec.SyncPolicy.Automated.Prune }/>
+						Prune
+					</label>
+					<label class="check check--upper" title="Plan only: nothing is registered or deleted">
+						<input type="checkbox" name="dryRun" value="true"/>
+						Dry run
+					</label>
+				</div>
+			</div>
+			<div class="form-section">
+				<div class="form-section__title">Sync options</div>
+				<div class="checks">
+					for _, c := range SyncOptionChoices {
+						<label class="check check--upper" title={ c.Help }>
+							<input type="checkbox" name="syncOption" value={ c.Option } checked?={ p.App.Spec.SyncPolicy.HasOption(c.Option) }/>
+							{ c.Label }
+						</label>
+					}
+				</div>
+				<div class="checks mt">
+					<label class="check check--upper">
+						<input type="checkbox" name="retry" value="true" checked?={ p.App.Spec.SyncPolicy != nil && p.App.Spec.SyncPolicy.Retry != nil }/>
+						Retry
+					</label>
+					<label class="check">
+						limit
+						<input class="input" style="width:70px;height:28px" type="number" min="1" max="20" name="retryLimit" value="2"/>
+					</label>
+				</div>
+			</div>
+			<div class="form-section">
+				<div class="form-section__title">Synchronize resources</div>
+				if len(p.Resources) == 0 {
+					<div class="muted">No resources yet: the sync creates everything the source renders.</div>
+				} else {
+					<input type="hidden" name="partial" value="1"/>
+					<div class="field__help mb">Leave everything selected to sync the whole application.</div>
+					<div class="checks checks--column">
+						for _, r := range p.Resources {
+							<label class="check">
+								<input type="checkbox" name="resource" value={ r.Key() } checked/>
+								@StatusIcon(r.Sync, "icon--sm")
+								@Icon(KindIcon(r.Kind), "icon--sm")
+								<span class="muted">{ r.Kind }</span>
+								<span class="mono">{ resourceName(r.Namespace, r.Name) }</span>
+								if r.Pruning {
+									<span class="pill" style="background: var(--degraded)">prune</span>
+								}
+							</label>
+						}
+					</div>
+				}
+			</div>
+			<div class="flex">
+				<button class="btn" type="submit">
+					@Icon("sync")
+					Synchronize
+				</button>
+				@closeButton(p.CloseHref, "Cancel")
+			</div>
+		</form>
+	}
+}
+
+// ─── sync status (operation) ────────────────────────────────────────────
+
+templ OperationPanelView(p OperationPanel) {
+	@PanelFrame("Sync status", "check", p.CloseHref, false, operationActions(p)) {
+		<div hidden hx-get={ AppURL(p.App.Metadata.Name, "", "panel", "status") } hx-trigger="sse:app" hx-target="#panel" hx-indicator="#quiet"></div>
+		if st := p.App.Status.OperationState; st == nil {
+			<div class="empty white-box">
+				@Icon("sync", "empty__icon")
+				<div class="empty__title">No sync yet</div>
+				<div class="empty__text">This application has not been synced.</div>
+			</div>
+		} else {
+			<div class="white-box">
+				<div class="kv">
+					<div class="kv__key">Operation</div>
+					<div>{ operationName(st) }</div>
+					<div class="kv__key">Phase</div>
+					<div>
+						<span class="status">
+							@StatusIcon(string(st.Phase))
+							{ string(st.Phase) }
+						</span>
+					</div>
+					if st.Message != "" {
+						<div class="kv__key">Message</div>
+						<div>{ st.Message }</div>
+					}
+					<div class="kv__key">Started at</div>
+					<div>{ Timestamp(st.StartedAt) } <span class="faint">({ Ago(st.StartedAt) })</span></div>
+					<div class="kv__key">Duration</div>
+					<div>{ Duration(st.StartedAt, st.FinishedAt) }</div>
+					if st.FinishedAt != nil {
+						<div class="kv__key">Finished at</div>
+						<div>{ TimestampPtr(st.FinishedAt) } <span class="faint">({ AgoPtr(st.FinishedAt) })</span></div>
+					}
+					<div class="kv__key">Initiated by</div>
+					<div>{ Initiator(st.Operation.InitiatedBy) }</div>
+					if st.RetryCount > 0 {
+						<div class="kv__key">Retries</div>
+						<div>{ strconv.FormatInt(st.RetryCount, 10) }</div>
+					}
+					if st.SyncResult != nil && st.SyncResult.Revision != "" {
+						<div class="kv__key">Revision</div>
+						<div class="mono">
+							if u := CommitURL(p.App.Spec.Source.RepoURL, st.SyncResult.Revision); u != "" {
+								<a href={ ExternalURL(u) } target="_blank" rel="noopener noreferrer" hx-boost="false">{ st.SyncResult.Revision }</a>
+							} else {
+								{ st.SyncResult.Revision }
+							}
+						</div>
+					}
+				</div>
+			</div>
+			if st.SyncResult != nil && len(st.SyncResult.Resources) > 0 {
+				<div class="white-box">
+					<div class="white-box__title">Result</div>
+					<table class="table table--plain table--compact">
+						<thead>
+							<tr>
+								<th>Kind</th>
+								<th>Namespace</th>
+								<th>Name</th>
+								<th>Status</th>
+								<th>Phase</th>
+								<th>Message</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, r := range st.SyncResult.Resources {
+								<tr>
+									<td>{ r.Kind }</td>
+									<td class="muted">{ r.Namespace }</td>
+									<td class="mono">{ r.Name }</td>
+									<td class="nowrap">
+										<span class="status">
+											@StatusIcon(string(r.Status), "icon--sm")
+											{ string(r.Status) }
+										</span>
+									</td>
+									<td class="muted">{ r.SyncPhase }</td>
+									<td>
+										{ r.Message }
+										if r.JobVersion != nil {
+											<span class="faint small">· job version { U64(r.JobVersion) }</span>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			}
+		}
+	}
+}
+
+templ operationActions(p OperationPanel) {
+	if p.CanSync && (p.App.Operation != nil || (p.App.Status.OperationState != nil && !p.App.Status.OperationState.Phase.Completed())) {
+		<button class="btn btn--danger" type="button" hx-post={ AppHref(p.App.Metadata.Name) + "/terminate" } hx-swap="none" hx-confirm="Terminate the running sync?">
+			@Icon("stop")
+			Terminate
+		</button>
+	}
+}
+
+func operationName(st *v1.OperationState) string {
+	if st.Operation.Sync != nil && st.Operation.Sync.RollbackID != nil {
+		return "Rollback to history entry " + strconv.FormatInt(*st.Operation.Sync.RollbackID, 10)
+	}
+	if st.Operation.Sync != nil && st.Operation.Sync.DryRun {
+		return "Sync (dry run)"
+	}
+	return "Sync"
+}
+
+// ─── history and rollback ───────────────────────────────────────────────
+
+templ HistoryPanelView(p HistoryPanel) {
+	@PanelFrame(p.App.Metadata.Name+" — history", "history", p.CloseHref, false, nil) {
+		if len(p.Entries) == 0 {
+			<div class="empty white-box">
+				@Icon("history", "empty__icon")
+				<div class="empty__title">No deployments yet</div>
+				<div class="empty__text">Every successful sync is recorded here and can be rolled back to.</div>
+			</div>
+		} else {
+			if p.App.Spec.SyncPolicy.IsAutomated() {
+				<div class="alert alert--info mb">
+					@Icon("info")
+					<div>Rollback is not available while auto-sync is enabled: disable it in the application details first.</div>
+				</div>
+			}
+			<div class="history">
+				for _, e := range p.Entries {
+					<div class={ "history__item", templ.KV("history__item--active", e.Active) }>
+						<div>
+							<div class="history__when">{ Ago(e.DeployedAt) }</div>
+							<div class="history__meta">{ Timestamp(e.DeployedAt) }</div>
+							<div class="history__meta">
+								if e.Active {
+									Active for { Duration(e.DeployedAt, nil) }
+								} else if e.Until != nil {
+									Active for { Duration(e.DeployedAt, e.Until) }
+								}
+							</div>
+							if e.DeployStartedAt != nil {
+								<div class="history__meta">Time to deploy: { Duration(*e.DeployStartedAt, &e.DeployedAt) }</div>
+							}
+						</div>
+						<div style="min-width:0">
+							<div class="flex">
+								@Icon("git", "icon--sm")
+								<span class="mono">
+									if u := CommitURL(e.Source.RepoURL, e.Revision); u != "" {
+										<a href={ ExternalURL(u) } target="_blank" rel="noopener noreferrer" hx-boost="false">{ ShortRev(e.Revision) }</a>
+									} else {
+										{ ShortRev(e.Revision) }
+									}
+								</span>
+								<span class="muted">{ e.Source.Revision() }</span>
+								<span class="faint small">· #{ strconv.FormatInt(e.ID, 10) } by { Initiator(e.InitiatedBy) }</span>
+							</div>
+							if e.Commit != nil {
+								<div class="history__meta truncate">{ e.Commit.Author }</div>
+								<div class="truncate" title={ e.Commit.Message }>{ FirstLine(e.Commit.Message) }</div>
+							}
+							<div class="history__meta truncate">{ e.Source.RepoURL } { e.Source.Path }</div>
+							if len(e.JobVersions) > 0 {
+								<div class="tags mt">
+									for _, k := range sortedVersionKeys(e.JobVersions) {
+										<span class="tag mono">{ k } v{ strconv.FormatUint(e.JobVersions[k], 10) }</span>
+									}
+								</div>
+							}
+						</div>
+						<div>
+							if e.Active {
+								<span class="pill" style="background: var(--healthy)">current</span>
+							} else if p.CanSync && !p.App.Spec.SyncPolicy.IsAutomated() {
+								<button class="btn btn--sm btn--outline" type="button" hx-post={ AppHref(p.App.Metadata.Name) + "/rollback?id=" + strconv.FormatInt(e.ID, 10) } hx-target="#panel" hx-confirm={ "Roll back to " + ShortRev(e.Revision) + "? The jobs are reverted to the versions this sync produced." }>
+									@Icon("history", "icon--sm")
+									Rollback
+								</button>
+							}
+						</div>
+					</div>
+				}
+			</div>
+		}
+	}
+}
+
+func sortedVersionKeys(m map[string]uint64) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sortStrings(keys)
+	return keys
+}
+
+// ─── delete ─────────────────────────────────────────────────────────────
+
+templ DeletePanelView(p DeletePanel) {
+	@PanelFrame("Delete "+p.App.Metadata.Name, "trash", p.CloseHref, true, nil) {
+		@panelError(p.Error)
+		<form class="form" hx-post={ AppHref(p.App.Metadata.Name) + "/delete" } hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+			<input type="hidden" name="close" value={ p.CloseHref }/>
+			<div class="form-section">
+				<p>Are you sure you want to delete the application <b>{ p.App.Metadata.Name }</b>?</p>
+				<div class="checks checks--column mt mb">
+					<label class="check">
+						<input type="radio" name="cascade" value="true" checked/>
+						<span><b>Cascade</b> — delete its Nomad jobs and Consul keys too</span>
+					</label>
+					<label class="check">
+						<input type="radio" name="cascade" value="false"/>
+						<span><b>Non-cascading</b> — remove the application only; jobs and keys keep running</span>
+					</label>
+				</div>
+				<label class="field">
+					<span class="field__label">Type the application name to confirm</span>
+					<input class="input" name="confirm" autocomplete="off" required placeholder={ p.App.Metadata.Name }/>
+				</label>
+			</div>
+			<div class="flex">
+				<button class="btn btn--danger" type="submit">
+					@Icon("trash")
+					Delete
+				</button>
+				@closeButton(p.CloseHref, "Cancel")
+			</div>
+		</form>
+	}
+}
+
+// ─── resource node ──────────────────────────────────────────────────────
+
+templ NodePanelView(p NodePanel) {
+	@PanelFrame(p.Node.Name, KindIcon(p.Node.Kind), p.CloseHref, false, nodeActions(p)) {
+		<div class="flex mb">
+			<span class="tag">{ p.Node.Kind }</span>
+			if p.Node.Namespace != "" {
+				<span class="tag">namespace: { p.Node.Namespace }</span>
+			}
+			if p.Node.Health != "" {
+				@HealthStatus(p.Node.Health, p.Node.HealthMsg)
+			}
+			if p.Node.Sync != "" {
+				@SyncStatus(p.Node.Sync)
+			}
+		</div>
+		@PanelTabs(p.Tabs)
+		@panelError(p.Error)
+		switch p.Tab {
+			case "live":
+				@YAML(p.Manifest)
+			case "desired":
+				if p.Desired == "" {
+					<div class="muted">This resource is not rendered from Git.</div>
+				} else {
+					@YAML(p.Desired)
+				}
+			case "diff":
+				<div class="diff">
+					<div class="diff__header">Live → desired (Git)</div>
+					@DiffLines(p.Diff)
+				</div>
+				if p.PlanDiff != "" {
+					<div class="white-box mt">
+						<div class="white-box__title">Nomad plan</div>
+						<pre class="code code--wrap">{ p.PlanDiff }</pre>
+					</div>
+				}
+			case "events":
+				@nodeEvents(p.Events)
+			case "logs":
+				if p.Logs != nil {
+					@LogsViewer(*p.Logs)
+				}
+			default:
+				<div class="white-box">
+					<div class="kv">
+						for _, kv := range p.Summary {
+							<div class="kv__key">{ kv[0] }</div>
+							<div>{ kv[1] }</div>
+						}
+					</div>
+				</div>
+				if p.Node.HealthMsg != "" {
+					<div class="white-box">
+						<div class="white-box__title">Health details</div>
+						<div>{ p.Node.HealthMsg }</div>
+					</div>
+				}
+		}
+	}
+}
+
+templ nodeActions(p NodePanel) {
+	for _, a := range p.Node.Actions {
+		<button
+			class={ "btn", "btn--outline", templ.KV("btn--danger", a.Danger) }
+			type="button"
+			hx-post={ a.Post }
+			hx-swap="none"
+			if a.Confirm != "" {
+				hx-confirm={ a.Confirm }
+			}
+		>
+			@Icon(actionIcon(a.Name))
+			{ a.Label }
+		</button>
+	}
+}
+
+templ nodeEvents(events []NodeEvent) {
+	if len(events) == 0 {
+		<div class="empty white-box">
+			@Icon("history", "empty__icon")
+			<div class="empty__title">No events</div>
+		</div>
+	} else {
+		<table class="table table--compact">
+			<thead>
+				<tr>
+					<th>Time</th>
+					<th>Source</th>
+					<th>Type</th>
+					<th>Message</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, e := range events {
+					<tr>
+						<td class="nowrap" title={ Timestamp(e.Time) }>{ Ago(e.Time) }</td>
+						<td class="muted nowrap">{ e.Source }</td>
+						<td class="nowrap bold">{ e.Reason }</td>
+						<td>{ e.Message }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+// LogsViewer streams a task's logs over server-sent events.
+templ LogsViewer(l LogsView) {
+	<div class="logs">
+		<form class="logs__toolbar" hx-get={ l.FormURL } hx-target="#panel" hx-trigger="change" hx-push-url="true">
+			<input type="hidden" name="tab" value="logs"/>
+			if len(l.Tasks) > 1 {
+				<select class="select" name="task" aria-label="Task">
+					for _, t := range l.Tasks {
+						<option value={ t } selected?={ t == l.Task }>{ t }</option>
+					}
+				</select>
+			} else {
+				<input type="hidden" name="task" value={ l.Task }/>
+				<span class="tag">task: { l.Task }</span>
+			}
+			<select class="select" name="type" aria-label="Stream">
+				<option value="stdout" selected?={ l.Type != "stderr" }>stdout</option>
+				<option value="stderr" selected?={ l.Type == "stderr" }>stderr</option>
+			</select>
+			<select class="select" name="tail" aria-label="Lines">
+				for _, n := range []int{100, 500, 1000, 5000} {
+					<option value={ strconv.Itoa(n) } selected?={ n == l.Tail }>last { strconv.Itoa(n) } lines</option>
+				}
+			</select>
+			<label class="check check--upper">
+				<input type="checkbox" name="follow" value="true" checked?={ l.Follow }/>
+				Follow
+			</label>
+			<a class="btn btn--sm btn--outline right" href={ SafeURL(l.Download) } hx-boost="false" download>
+				@Icon("download", "icon--sm")
+				Download
+			</a>
+		</form>
+		<div class="logs__content" hx-ext="sse" sse-connect={ l.StreamURL } sse-swap="log" hx-swap="beforeend" sse-close="done" aria-live="off"></div>
+	</div>
+}

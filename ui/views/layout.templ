@@ -1,0 +1,274 @@
+// Copyright 2026 G.G (https://github.com/gitaginanjar)
+// SPDX-License-Identifier: Apache-2.0
+
+package views
+
+import "github.com/gitaginanjar/cystemd/ui"
+
+// htmxConfig: no eval and no injected styles (strict CSP), no history
+// snapshots in localStorage (live pages go stale; back re-fetches them), and
+// error responses are swapped so handlers can return inline errors and
+// notifications.
+const htmxConfig = `{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"historyCacheSize":0,"refreshOnHistoryMiss":false,"selfRequestsOnly":true,"scrollIntoViewOnBoost":false,"defaultSettleDelay":0,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}`
+
+func themeAttr(theme string) string {
+	switch theme {
+	case "dark", "auto":
+		return theme
+	}
+	return "light"
+}
+
+templ document(title, theme string) {
+	<!DOCTYPE html>
+	<html lang="en" data-theme={ themeAttr(theme) }>
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta name="htmx-config" content={ htmxConfig }/>
+			<meta name="color-scheme" content="light dark"/>
+			<title>{ title } · CYSTEMD</title>
+			<link rel="icon" type="image/png" href={ ui.Asset("img/favicon.png") }/>
+			<link rel="stylesheet" href={ ui.Asset("css/cystemd.css") }/>
+			<script defer src={ ui.Asset("vendor/htmx-2.0.11.min.js") }></script>
+			<script defer src={ ui.Asset("vendor/htmx-ext-sse-2.2.4.min.js") }></script>
+			<script defer src={ ui.Asset("js/cystemd.js") }></script>
+		</head>
+		{ children... }
+	</html>
+}
+
+// Shell is the frame of a signed-in page: sidebar, top bar with
+// breadcrumbs and toolbar, content, and the sliding-panel and notification
+// containers. stream, when set, is the live-update event stream the page's
+// regions refresh from.
+templ Shell(p Page, toolbar templ.Component, stream string) {
+	@document(p.Title, p.Theme) {
+		<body hx-boost="true" hx-indicator="#progress">
+			<div id="progress"></div>
+			<i id="quiet" hidden></i>
+			<div
+				class="layout"
+				if stream != "" {
+					hx-ext="sse"
+					sse-connect={ stream }
+				}
+			>
+				@sidebar(p)
+				<div class="page">
+					<header class="topbar">
+						<div class="topbar__row">
+							@breadcrumbs(p.Crumbs)
+							<div class="topbar__title">{ p.Heading }</div>
+						</div>
+						if toolbar != nil {
+							<div class="topbar__row">
+								@toolbar
+							</div>
+						}
+					</header>
+					{ children... }
+				</div>
+				<div id="panel">
+					if p.Panel != nil {
+						@p.Panel
+					}
+				</div>
+			</div>
+			<div id="toasts" aria-live="polite">
+				for _, t := range p.Toasts {
+					@toast(t)
+				}
+			</div>
+		</body>
+	}
+}
+
+templ sidebar(p Page) {
+	<nav class="sidebar" aria-label="Main">
+		<a class="sidebar__brand" href="/ui/applications">
+			<img class="sidebar__emblem" src={ ui.Asset("img/emblem.png") } alt="" width="40" height="40"/>
+			<span class="sidebar__name"><b>CY</b>STEM<i>D</i></span>
+		</a>
+		<div class="sidebar__version" title={ p.Version }>{ p.Version }</div>
+		<ul class="sidebar__nav">
+			@navItem(p.Nav == "applications", "Applications", "/ui/applications", "apps")
+			@navItem(p.Nav == "settings", "Settings", "/ui/settings", "settings")
+			@navItem(p.Nav == "user-info", "User Info", "/ui/user-info", "user")
+			<li>
+				<a class="sidebar__item" href="https://github.com/gitaginanjar/cystemd/tree/main/docs" target="_blank" rel="noopener noreferrer" hx-boost="false" title="Documentation">
+					@Icon("book")
+					<span class="sidebar__label">Documentation</span>
+				</a>
+			</li>
+		</ul>
+		<div class="sidebar__footer">
+			<button class="sidebar__item sidebar__collapse" type="button" hx-post="/ui/logout" title={ "Log out " + p.User.Name }>
+				@Icon("logout")
+				<span class="sidebar__label truncate">Log out <span class="faint">({ p.User.Name })</span></span>
+			</button>
+			<button class="sidebar__item sidebar__collapse" type="button" data-nav-toggle title="Collapse the menu">
+				@Icon("collapse")
+				<span class="sidebar__label">Collapse</span>
+			</button>
+		</div>
+	</nav>
+}
+
+templ navItem(active bool, label, href, icon string) {
+	<li>
+		<a class={ "sidebar__item", templ.KV("sidebar__item--active", active) } href={ SafeURL(href) } title={ label }>
+			@Icon(icon)
+			<span class="sidebar__label">{ label }</span>
+		</a>
+	</li>
+}
+
+templ breadcrumbs(crumbs []Crumb) {
+	<nav class="breadcrumbs" aria-label="Breadcrumb">
+		for i, c := range crumbs {
+			if i > 0 {
+				<span class="breadcrumbs__sep">/</span>
+			}
+			if i == len(crumbs)-1 {
+				<span class="breadcrumbs__current">{ c.Label }</span>
+			} else {
+				<a href={ SafeURL(c.Href) }>{ c.Label }</a>
+			}
+		}
+	</nav>
+}
+
+// PanelFrame is a sliding panel. closeHref restores the page without the
+// panel (and the URL with it).
+templ PanelFrame(title, icon, closeHref string, narrow bool, actions templ.Component) {
+	<div class="sliding-panel" role="dialog" aria-modal="true" aria-label={ title }>
+		<a class="sliding-panel__overlay" href={ SafeURL(closeHref) } hx-get={ closeHref } hx-target="#panel" hx-push-url="true" aria-label="Close" tabindex="-1"></a>
+		<div class={ "sliding-panel__body", templ.KV("sliding-panel__body--narrow", narrow) }>
+			<div class="sliding-panel__header">
+				<div class="sliding-panel__heading">
+					@Icon(icon, "icon--lg")
+					<h2>{ title }</h2>
+				</div>
+				if actions != nil {
+					@actions
+				}
+				<a class="sliding-panel__close" href={ SafeURL(closeHref) } hx-get={ closeHref } hx-target="#panel" hx-push-url="true" title="Close (Esc)">
+					@Icon("close", "icon--lg")
+				</a>
+			</div>
+			<div class="sliding-panel__content">
+				{ children... }
+			</div>
+		</div>
+	</div>
+}
+
+// PanelTabs renders tabs that load into the panel.
+templ PanelTabs(tabs []Tab) {
+	<nav class="tabs">
+		for _, t := range tabs {
+			<a class={ "tabs__item", templ.KV("tabs__item--active", t.Active) } href={ SafeURL(t.Href) } hx-get={ t.Href } hx-target="#panel" hx-push-url="true">{ t.Label }</a>
+		}
+	</nav>
+}
+
+// Toasts appends notifications to the page (an out-of-band swap).
+templ Toasts(toasts ...Toast) {
+	<div id="toasts" hx-swap-oob="beforeend">
+		for _, t := range toasts {
+			@toast(t)
+		}
+	</div>
+}
+
+templ toast(t Toast) {
+	<div class={ "toast", "toast--" + t.Kind } role="status">
+		if t.Kind == "error" {
+			@StatusIcon("Failed")
+		} else if t.Kind == "warning" {
+			@StatusIcon("Warning")
+		} else {
+			@StatusIcon("Succeeded")
+		}
+		<div class="toast__text">{ t.Message }</div>
+		<button class="toast__close" type="button" data-dismiss=".toast" aria-label="Dismiss">
+			@Icon("close", "icon--sm")
+		</button>
+	</div>
+}
+
+// ErrorView is a full-page error (404, 403, unavailable).
+templ ErrorView(p ErrorPage) {
+	@Shell(p.Page, nil, "") {
+		<main class="content">
+			<div class="empty">
+				@StatusIcon("Warning", "empty__icon")
+				<div class="empty__title">{ p.Message }</div>
+				<div class="empty__text">Error { Itoa(p.Code) }</div>
+				<a class="btn btn--outline" href="/ui/applications">Back to applications</a>
+			</div>
+		</main>
+	}
+}
+
+// LoginView is the sign-in page.
+templ LoginView(p LoginPage) {
+	@document("Sign in", p.Theme) {
+		<body hx-indicator="#progress">
+			<div id="progress"></div>
+			<div class="login">
+				<div class="login__hero">
+					<img class="login__logo" src={ ui.Asset("img/logo.png") } alt="CYSTEMD — continuous systemd deployment"/>
+					<div class="login__tagline">Let's get stuff deployed!</div>
+					<div class="login__sub">GitOps for Nomad and systemd, with Consul and Vault built in.</div>
+				</div>
+				<div class="login__box">
+					<h1>Sign in</h1>
+					<p>to the CYSTEMD control plane</p>
+					<div id="login-error" class="login__error mb">
+						if p.Error != "" {
+							@LoginError(p.Error)
+						}
+					</div>
+					if p.LocalEnabled {
+						<form class="login__form" hx-post="/ui/login" hx-target="#login-error" hx-disabled-elt="find button">
+							<input type="hidden" name="return_url" value={ p.ReturnURL }/>
+							<label class="field">
+								<span class="field__label">Username</span>
+								<input class="input" name="username" autocomplete="username" required autofocus value={ p.Username }/>
+							</label>
+							<label class="field">
+								<span class="field__label">Password</span>
+								<input class="input" name="password" type="password" autocomplete="current-password" required/>
+							</label>
+							<button class="btn" type="submit">Sign in</button>
+						</form>
+					}
+					if p.LocalEnabled && p.NomadTokenLogin {
+						<div class="login__divider">or</div>
+					}
+					if p.NomadTokenLogin {
+						<form class="login__form" hx-post="/ui/login" hx-target="#login-error" hx-disabled-elt="find button">
+							<input type="hidden" name="return_url" value={ p.ReturnURL }/>
+							<label class="field">
+								<span class="field__label">Nomad ACL token</span>
+								<input class="input mono" name="nomad_token" type="password" autocomplete="off" placeholder="Secret ID" required/>
+							</label>
+							<button class="btn btn--outline" type="submit">Sign in with Nomad token</button>
+						</form>
+					}
+					<div class="login__footer">CYSTEMD { p.Version }</div>
+				</div>
+			</div>
+			<div id="toasts" aria-live="polite"></div>
+		</body>
+	}
+}
+
+templ LoginError(msg string) {
+	<div class="alert alert--error" role="alert">
+		@StatusIcon("Failed")
+		<div>{ msg }</div>
+	</div>
+}

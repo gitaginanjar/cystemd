@@ -64,15 +64,14 @@ type Options struct {
 	Elector  store.Elector
 	Logger   *slog.Logger
 	Build    BuildInfo
-	// UI serves the web UI under /ui/ (standalone mode).
-	UI http.FileSystem
 }
 
-// Server serves the API.
+// Server serves the API and the web UI.
 type Server struct {
 	Options
-	logger *slog.Logger
-	creds  *Credentials
+	logger  *slog.Logger
+	creds   *Credentials
+	commits commitCache
 }
 
 // New returns a Server.
@@ -187,18 +186,17 @@ func (s *Server) APIHandler() http.Handler {
 	return securityHeaders(mux)
 }
 
-// Handler returns the full standalone handler: API, UI, health and metrics.
+// Handler returns the full standalone handler: API, web UI, health and
+// metrics.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerAPI(mux)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.Handle("GET /metrics", s.Metrics.Handler())
-	if s.UI != nil {
-		mux.Handle("GET /ui/", http.StripPrefix("/ui/", uiHandler(s.UI)))
-		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/ui/", http.StatusTemporaryRedirect)
-		})
-	}
+	mux.Handle("/ui/", s.webHandler(true))
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusTemporaryRedirect)
+	})
 	return securityHeaders(mux)
 }
 
@@ -285,28 +283,44 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// statusError carries an HTTP status; its message is shown as is.
+type statusError struct {
+	code int
+	msg  string
+}
+
+func (e *statusError) Error() string { return e.msg }
+
+func statusErr(code int, format string, args ...any) error {
+	return &statusError{code: code, msg: fmt.Sprintf(format, args...)}
+}
+
+func badRequest(format string, args ...any) error {
+	return statusErr(http.StatusBadRequest, format, args...)
+}
+
+func notFound(format string, args ...any) error {
+	return statusErr(http.StatusNotFound, format, args...)
+}
+
+func forbidden(format string, args ...any) error {
+	return statusErr(http.StatusForbidden, format, args...)
+}
+
 // errorCode maps an error to an HTTP status.
 func errorCode(err error) int {
+	var se *statusError
 	switch {
+	case errors.As(err, &se):
+		return se.code
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, controller.ErrMissing):
 		return http.StatusNotFound
 	case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrExists):
 		return http.StatusConflict
-	case errors.Is(err, controller.ErrNotManaged), errors.Is(err, errForbidden):
+	case errors.Is(err, controller.ErrNotManaged):
 		return http.StatusForbidden
-	case errors.Is(err, errBadRequest):
-		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError
-}
-
-var (
-	errForbidden  = errors.New("permission denied")
-	errBadRequest = errors.New("bad request")
-)
-
-func badRequest(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", errBadRequest, fmt.Sprintf(format, args...))
 }
 
 func (s *Server) fail(w http.ResponseWriter, err error) {
@@ -328,15 +342,23 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
-// can enforces RBAC and audits denials.
-func (s *Server) can(w http.ResponseWriter, r *http.Request, resource, action, object string) bool {
+// authorize enforces RBAC for the caller and audits denials.
+func (s *Server) authorize(r *http.Request, resource, action, object string) error {
 	id := identity(r)
 	if s.RBAC.Enforce(id.Username, id.Groups, resource, action, object) {
-		return true
+		return nil
 	}
 	s.audit(r, resource+"/"+action, object, "DENIED", "")
-	writeError(w, http.StatusForbidden, fmt.Sprintf("permission denied: %s, %s, %s", resource, action, object))
-	return false
+	return forbidden("permission denied: %s, %s, %s", resource, action, object)
+}
+
+// can is authorize for JSON handlers: it writes the 403 itself.
+func (s *Server) can(w http.ResponseWriter, r *http.Request, resource, action, object string) bool {
+	if err := s.authorize(r, resource, action, object); err != nil {
+		s.fail(w, err)
+		return false
+	}
+	return true
 }
 
 func appObject(app *v1.Application) string { return app.Spec.Project + "/" + app.Metadata.Name }
@@ -392,8 +414,12 @@ type Settings struct {
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.settings())
+}
+
+func (s *Server) settings() Settings {
 	c := s.Config
-	writeJSON(w, http.StatusOK, Settings{
+	return Settings{
 		URL:                c.URL,
 		AppLabelKey:        v1.AppMetaKey,
 		UserLoginsDisabled: !*c.Auth.AdminEnabled,
@@ -404,7 +430,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		VaultEnabled:       c.VaultEnabled(),
 		KVPrefix:           c.Consul.KVPrefix,
 		Mode:               s.Build.Mode,
-	})
+	}
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -428,7 +454,11 @@ type ComponentHealth struct {
 }
 
 func (s *Server) handleHealthDetail(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	writeJSON(w, http.StatusOK, s.healthDetail(r.Context()))
+}
+
+func (s *Server) healthDetail(ctx context.Context) HealthDetail {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	out := HealthDetail{Nomad: []*ComponentHealth{}}
 	if s.Elector != nil {
@@ -467,5 +497,5 @@ func (s *Server) handleHealthDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Vault = h
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out
 }

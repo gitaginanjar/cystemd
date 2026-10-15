@@ -1,0 +1,444 @@
+// Copyright 2026 G.G (https://github.com/gitaginanjar)
+// SPDX-License-Identifier: Apache-2.0
+
+package views
+
+import v1 "github.com/gitaginanjar/cystemd/pkg/apis/v1alpha1"
+
+// AppView is the application details page. The status panel and the
+// resource views refresh on their own when the server reports a change.
+templ AppView(p AppPage) {
+	@Shell(p.Page, appToolbar(p), "/ui/stream/applications/"+p.App.Metadata.Name) {
+		<div hidden hx-get={ AppHref(p.App.Metadata.Name) + "?_live=1" } hx-trigger="sse:app" hx-target="#app-status" hx-swap="outerHTML" hx-indicator="#quiet"></div>
+		<div hidden hx-get={ AppHref(p.App.Metadata.Name) + "?_live=1" } hx-trigger="sse:app" hx-target="#app-resources" hx-swap="outerHTML" hx-indicator="#quiet"></div>
+		@AppStatus(p)
+		@resourcesBar(p)
+		@AppResources(p)
+	}
+}
+
+templ panelButton(p AppPage, panel, icon, label string, primary bool) {
+	<a
+		class={ "btn", templ.KV("btn--outline", !primary) }
+		href={ SafeURL(p.Href("panel", panel)) }
+		hx-get={ p.Href("panel", panel) }
+		hx-target="#panel"
+		hx-push-url="true"
+	>
+		@Icon(icon)
+		{ label }
+	</a>
+}
+
+templ appToolbar(p AppPage) {
+	<div class="toolbar">
+		@panelButton(p, "details", "info", "Details", false)
+		@panelButton(p, "diff", "diff", "Diff", false)
+		if p.Perms.Sync {
+			@panelButton(p, "sync", "sync", "Sync", true)
+		}
+		@panelButton(p, "status", "check", "Sync status", false)
+		@panelButton(p, "history", "history", "History and rollback", false)
+		if p.Perms.Delete {
+			@panelButton(p, "delete", "trash", "Delete", false)
+		}
+		<div class="btn-group">
+			<button class="btn btn--outline" type="button" hx-post={ AppHref(p.App.Metadata.Name) + "/refresh" } hx-swap="none" title="Compare the live state with Git now">
+				@Icon("refresh")
+				Refresh
+			</button>
+			<details class="menu">
+				<summary class="btn btn--outline btn--icon" aria-label="More refresh options">
+					@Icon("down", "icon--sm")
+				</summary>
+				<div class="menu__list menu__list--left">
+					<button class="menu__item" type="button" hx-post={ AppHref(p.App.Metadata.Name) + "/refresh?mode=hard" } hx-swap="none">
+						@Icon("refresh", "icon--sm")
+						Hard refresh (re-read the repository)
+					</button>
+				</div>
+			</details>
+		</div>
+	</div>
+}
+
+templ resourcesBar(p AppPage) {
+	<div class="details-bar">
+		<label class="search">
+			@Icon("search")
+			<span class="sr-only">Filter resources</span>
+			<input
+				class="input"
+				type="search"
+				name="filter"
+				placeholder="Filter resources by name or kind..."
+				autocomplete="off"
+				value={ p.Filter }
+				data-search
+				hx-get={ AppURL(p.App.Metadata.Name, p.View) }
+				hx-trigger="input changed delay:300ms, search"
+				hx-target="#app-resources"
+				hx-swap="outerHTML"
+				hx-push-url="true"
+			/>
+		</label>
+		<span class="muted small">{ Plural(len(p.App.Status.Resources), "managed resource") }</span>
+		<div class="view-toggle right" role="group" aria-label="View">
+			<a href={ SafeURL(AppURL(p.App.Metadata.Name, "tree", "filter", p.Filter)) } class={ templ.KV("active", p.View == "tree") } title="Tree">
+				@Icon("branch")
+			</a>
+			<a href={ SafeURL(AppURL(p.App.Metadata.Name, "list", "filter", p.Filter)) } class={ templ.KV("active", p.View == "list") } title="List">
+				@Icon("list")
+			</a>
+			<a href={ SafeURL(AppURL(p.App.Metadata.Name, "nodes", "filter", p.Filter)) } class={ templ.KV("active", p.View == "nodes") } title="Nodes">
+				@Icon("server")
+			</a>
+		</div>
+	</div>
+}
+
+// AppStatus is the status panel and the application's banners.
+templ AppStatus(p AppPage) {
+	<div id="app-status">
+		@statusPanel(p)
+		@appBanners(p)
+	</div>
+}
+
+// AppResources is the resource tree, list or nodes view.
+templ AppResources(p AppPage) {
+	<div id="app-resources">
+		if p.TreeErr != "" {
+			<div class="conditions">
+				<div class="alert alert--error">
+					@StatusIcon("Failed")
+					<div>Unable to load the live resource tree: { p.TreeErr }</div>
+				</div>
+			</div>
+		}
+		switch p.View {
+			case "list":
+				@resourceList(p)
+			case "nodes":
+				@nodesView(p)
+			default:
+				@resourceTree(p)
+		}
+	</div>
+}
+
+templ statusPanel(p AppPage) {
+	<div class="status-panel">
+		<div class="status-panel__section">
+			<div class="status-panel__title">App health</div>
+			<div class="status-panel__main">
+				@StatusIcon(HealthOf(p.App), "icon--lg")
+				{ HealthOf(p.App) }
+			</div>
+			if p.App.Status.Health.Message != "" {
+				<div class="status-panel__detail">
+					<div title={ p.App.Status.Health.Message }>{ p.App.Status.Health.Message }</div>
+				</div>
+			}
+		</div>
+		<a class="status-panel__section status-panel__link" href={ SafeURL(p.Href("panel", "diff")) } hx-get={ p.Href("panel", "diff") } hx-target="#panel" hx-push-url="true">
+			<div class="status-panel__title">Sync status</div>
+			<div class="status-panel__main">
+				@StatusIcon(SyncOf(p.App), "icon--lg")
+				{ SyncOf(p.App) }
+				if p.App.Status.Sync.Revision != "" {
+					<small>to { p.App.Spec.Source.Revision() } ({ ShortRev(p.App.Status.Sync.Revision) })</small>
+				}
+			</div>
+			<div class="status-panel__detail">
+				<div>{ AutoSyncText(p.App) }</div>
+				if p.SyncCommit != nil {
+					<div>Author: <b>{ p.SyncCommit.Author }</b></div>
+					<div title={ p.SyncCommit.Message }>Comment: { FirstLine(p.SyncCommit.Message) }</div>
+				}
+			</div>
+		</a>
+		if st := p.App.Status.OperationState; st != nil {
+			<a class="status-panel__section status-panel__section--grow status-panel__link" href={ SafeURL(p.Href("panel", "status")) } hx-get={ p.Href("panel", "status") } hx-target="#panel" hx-push-url="true">
+				<div class="status-panel__title">
+					if st.Phase.Completed() {
+						Last sync
+					} else {
+						Sync
+					}
+				</div>
+				<div class="status-panel__main">
+					@StatusIcon(string(st.Phase), "icon--lg")
+					{ OperationLabel(st) }
+					if st.SyncResult != nil && st.SyncResult.Revision != "" {
+						<small>to { ShortRev(st.SyncResult.Revision) }</small>
+					}
+				</div>
+				<div class="status-panel__detail">
+					if st.FinishedAt != nil {
+						<div>{ string(st.Phase) } { AgoPtr(st.FinishedAt) } <span class="faint">({ TimestampPtr(st.FinishedAt) })</span></div>
+					} else {
+						<div>Started { Ago(st.StartedAt) } by { Initiator(st.Operation.InitiatedBy) }</div>
+					}
+					if st.Message != "" {
+						<div title={ st.Message }>{ st.Message }</div>
+					}
+					if p.LastCommit != nil {
+						<div>Author: <b>{ p.LastCommit.Author }</b></div>
+						<div title={ p.LastCommit.Message }>Comment: { FirstLine(p.LastCommit.Message) }</div>
+					}
+				</div>
+			</a>
+		}
+	</div>
+}
+
+templ appBanners(p AppPage) {
+	if p.App.Metadata.DeletionTimestamp != nil || len(p.App.Status.Conditions) > 0 {
+		<div class="conditions">
+			if p.App.Metadata.DeletionTimestamp != nil {
+				<div class="alert alert--warning">
+					@StatusIcon("Progressing")
+					<div>This application is being deleted (requested { AgoPtr(p.App.Metadata.DeletionTimestamp) }): its jobs and Consul keys are removed first.</div>
+				</div>
+			}
+			for _, c := range p.App.Status.Conditions {
+				<div class={ "alert", conditionClass(c.Type) }>
+					@StatusIcon(conditionIcon(c.Type))
+					<div>
+						<b>{ c.Type }</b>
+						if c.LastTransitionTime != nil {
+							<span class="faint small">{ AgoPtr(c.LastTransitionTime) }</span>
+						}
+						<pre class="mono">{ c.Message }</pre>
+					</div>
+				</div>
+			}
+		</div>
+	}
+}
+
+func conditionClass(t string) string {
+	if t == v1.ConditionOrphanedWarning {
+		return "alert--warning"
+	}
+	return "alert--error"
+}
+
+func conditionIcon(t string) string {
+	if t == v1.ConditionOrphanedWarning {
+		return "Warning"
+	}
+	return "Failed"
+}
+
+templ resourceTree(p AppPage) {
+	if p.Tree != nil {
+		<div class="tree">
+			<div class="tree__canvas" style={ SizeStyle(p.Tree.Width, p.Tree.Height) }>
+				<svg class="tree__edges" width={ Itoa(p.Tree.Width) } height={ Itoa(p.Tree.Height) } aria-hidden="true">
+					for _, e := range p.Tree.Edges {
+						<path d={ e }></path>
+					}
+				</svg>
+				for _, n := range p.Tree.Nodes {
+					@treeNode(n)
+				}
+			</div>
+		</div>
+	}
+}
+
+templ treeNode(n TreeNode) {
+	if n.More > 0 {
+		<div class="tree-node tree-node--more" style={ NodeStyle(n.X, n.Y) }>+ { Itoa(n.More) } more</div>
+	} else {
+		<div
+			class={ "tree-node", "tree-node--" + n.Health, templ.KV("tree-node--root", n.Root), templ.KV("tree-node--orphan", n.Orphan), templ.KV("tree-node--selected", n.Selected) }
+			style={ NodeStyle(n.X, n.Y) }
+		>
+			<a class="tree-node__link" href={ SafeURL(n.Href) } hx-get={ n.Href } hx-target="#panel" hx-push-url="true" aria-label={ n.Kind + " " + n.Name }></a>
+			<div class="tree-node__icon">
+				@Icon(KindIcon(n.Kind))
+				<span class="tree-node__kind">{ KindAbbr(n.Kind) }</span>
+			</div>
+			<div class="tree-node__body">
+				<div class="tree-node__title">
+					<span class="tree-node__name" title={ n.Name }>{ n.Name }</span>
+					<span class="tree-node__status">
+						if n.Health != "" {
+							@StatusIcon(n.Health, "icon--sm")
+						}
+						if n.Sync != "" {
+							@StatusIcon(n.Sync, "icon--sm")
+						}
+					</span>
+				</div>
+				<div class="tree-node__info">
+					if n.Age != "" {
+						<span class="tag" title="Age">{ n.Age }</span>
+					}
+					for _, i := range n.Info {
+						<span class="tag" title={ i }>{ i }</span>
+					}
+				</div>
+			</div>
+			@nodeMenu(n)
+		</div>
+	}
+}
+
+templ nodeMenu(n TreeNode) {
+	<details class="menu tree-node__menu">
+		<summary aria-label="Actions">
+			@Icon("dots")
+		</summary>
+		<div class="menu__list">
+			<a class="menu__item" href={ SafeURL(n.Href) } hx-get={ n.Href } hx-target="#panel" hx-push-url="true">
+				@Icon("info", "icon--sm")
+				Details
+			</a>
+			if n.LogsHref != "" {
+				<a class="menu__item" href={ SafeURL(n.LogsHref) } hx-get={ n.LogsHref } hx-target="#panel" hx-push-url="true">
+					@Icon("terminal", "icon--sm")
+					Logs
+				</a>
+			}
+			if len(n.Actions) > 0 {
+				<div class="menu__sep"></div>
+				for _, a := range n.Actions {
+					<button
+						class={ "menu__item", templ.KV("menu__item--danger", a.Danger) }
+						type="button"
+						hx-post={ a.Post }
+						hx-swap="none"
+						if a.Confirm != "" {
+							hx-confirm={ a.Confirm }
+						}
+					>
+						@Icon(actionIcon(a.Name), "icon--sm")
+						{ a.Label }
+					</button>
+				}
+			}
+		</div>
+	</details>
+}
+
+func actionIcon(name string) string {
+	switch name {
+	case "restart":
+		return "refresh"
+	case "stop", "fail":
+		return "stop"
+	case "start", "resume", "promote":
+		return "play"
+	case "pause":
+		return "pause"
+	case "sync":
+		return "sync"
+	case "signal-hup":
+		return "sun"
+	}
+	return "cube"
+}
+
+templ resourceList(p AppPage) {
+	<div class="resource-list">
+		if p.Tree == nil || len(p.Tree.Nodes) <= 1 {
+			<div class="empty white-box">
+				@Icon("cube", "empty__icon")
+				<div class="empty__title">No resources</div>
+				<div class="empty__text">Sync the application to create its Nomad jobs and Consul keys.</div>
+			</div>
+		} else {
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Kind</th>
+						<th>Namespace</th>
+						<th>Info</th>
+						<th>Age</th>
+						<th>Status</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, n := range p.Tree.Nodes {
+						if !n.Root && n.More == 0 {
+							<tr class="clickable" hx-get={ n.Href } hx-target="#panel" hx-push-url="true">
+								<td style={ indent(n.Depth) }>
+									<div class="flex">
+										@Icon(KindIcon(n.Kind), "icon--sm")
+										<span class="bold truncate" title={ n.Name }>{ n.Name }</span>
+									</div>
+								</td>
+								<td class="muted">{ n.Kind }</td>
+								<td class="muted">{ n.Namespace }</td>
+								<td>
+									<div class="tags">
+										for _, i := range n.Info {
+											<span class="tag">{ i }</span>
+										}
+									</div>
+								</td>
+								<td class="muted nowrap">{ n.Age }</td>
+								<td class="nowrap">
+									if n.Health != "" {
+										@HealthStatus(n.Health, n.HealthMsg)
+									}
+									if n.Sync != "" {
+										@SyncStatus(n.Sync)
+									}
+								</td>
+								<td class="table__actions">
+									@nodeMenu(n)
+								</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+		}
+	</div>
+}
+
+func indent(depth int) templ.SafeCSS {
+	if depth < 1 {
+		depth = 1
+	}
+	return templ.SafeCSS("padding-left:" + Px(14+(depth-1)*18))
+}
+
+templ nodesView(p AppPage) {
+	if len(p.NodeGroups) == 0 {
+		<div class="resource-list">
+			<div class="empty white-box">
+				@Icon("server", "empty__icon")
+				<div class="empty__title">No allocations</div>
+				<div class="empty__text">None of this application's jobs have allocations on Nomad clients right now.</div>
+			</div>
+		</div>
+	} else {
+		<div class="nodes-view">
+			for _, g := range p.NodeGroups {
+				<div class="node-card">
+					<div class="node-card__head">
+						@Icon("server")
+						<span class="truncate">{ g.Node }</span>
+					</div>
+					<div class="node-card__meta">{ Plural(len(g.Allocs), "allocation") }</div>
+					<div class="node-card__allocs">
+						for _, a := range g.Allocs {
+							<a class="alloc-chip" href={ SafeURL(a.Href) } hx-get={ a.Href } hx-target="#panel" hx-push-url="true" title={ a.HealthMsg }>
+								@StatusIcon(a.Health, "icon--sm")
+								{ a.Name }
+							</a>
+						}
+					</div>
+				</div>
+			}
+		</div>
+	}
+}

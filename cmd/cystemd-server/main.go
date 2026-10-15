@@ -26,7 +26,6 @@ import (
 	"github.com/gitaginanjar/cystemd/internal/config"
 	"github.com/gitaginanjar/cystemd/internal/controlplane"
 	"github.com/gitaginanjar/cystemd/internal/server"
-	"github.com/gitaginanjar/cystemd/ui"
 )
 
 func main() {
@@ -55,16 +54,12 @@ func run() int {
 	logger := buildinfo.Logger(cfg.LogLevel, cfg.LogJSON)
 	logger.Info("cystemd-server starting", "version", buildinfo.Version(), "commit", buildinfo.Commit(),
 		"nomad", cfg.Nomad.Address, "consul", cfg.ConsulEnabled(), "vault", cfg.VaultEnabled())
-	if !ui.Built() {
-		logger.Warn("this binary embeds no web UI build; run `make ui` before building")
-	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	cp, err := controlplane.New(ctx, cfg, controlplane.Options{
 		Logger: logger,
-		UI:     ui.FS(),
 		Build: server.BuildInfo{
 			Version: buildinfo.Version(), GitCommit: buildinfo.Commit(), BuildDate: buildinfo.BuildTime(), Mode: "standalone",
 		},

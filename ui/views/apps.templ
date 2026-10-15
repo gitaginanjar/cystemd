@@ -1,0 +1,569 @@
+// Copyright 2026 G.G (https://github.com/gitaginanjar)
+// SPDX-License-Identifier: Apache-2.0
+
+package views
+
+import (
+	"net/url"
+	"strconv"
+
+	v1 "github.com/gitaginanjar/cystemd/pkg/apis/v1alpha1"
+)
+
+// HealthStatus is a health icon with its label.
+templ HealthStatus(code, message string) {
+	<span class="status" title={ message }>
+		@StatusIcon(code)
+		<span>{ code }</span>
+	</span>
+}
+
+// SyncStatus is a sync icon with its label.
+templ SyncStatus(code string) {
+	<span class="status">
+		@StatusIcon(code)
+		<span>{ code }</span>
+	</span>
+}
+
+// AppsView is the applications page.
+templ AppsView(p AppsPage) {
+	@Shell(p.Page, appsToolbar(p), "/ui/stream/applications") {
+		<div hidden hx-get="/ui/applications?_live=1" hx-trigger="sse:apps" hx-target="#apps-content" hx-swap="outerHTML" hx-indicator="#quiet"></div>
+		@AppsContent(p)
+	}
+}
+
+templ appsToolbar(p AppsPage) {
+	<div class="toolbar">
+		if p.CanCreate {
+			<a class="btn" href={ SafeURL(appsPanelHref(p.Q, "new", "")) } hx-get={ appsPanelHref(p.Q, "new", "") } hx-target="#panel" hx-push-url="true">
+				@Icon("plus")
+				New app
+			</a>
+		}
+		<a class="btn btn--outline" href={ SafeURL(appsPanelHref(p.Q, "sync-apps", "")) } hx-get={ appsPanelHref(p.Q, "sync-apps", "") } hx-target="#panel" hx-push-url="true">
+			@Icon("sync")
+			Sync apps
+		</a>
+		<a class="btn btn--outline" href={ SafeURL(appsPanelHref(p.Q, "refresh-apps", "")) } hx-get={ appsPanelHref(p.Q, "refresh-apps", "") } hx-target="#panel" hx-push-url="true">
+			@Icon("refresh")
+			Refresh apps
+		</a>
+		<div class="toolbar__right">
+			<label class="search">
+				@Icon("search")
+				<span class="sr-only">Search applications</span>
+				<input
+					class="input"
+					type="search"
+					name="search"
+					placeholder="Search applications..."
+					autocomplete="off"
+					value={ p.Q.Search }
+					data-search
+					hx-get="/ui/applications"
+					hx-trigger="input changed delay:300ms, search"
+					hx-target="#apps-content"
+					hx-swap="outerHTML"
+					hx-push-url="true"
+					hx-include="#apps-filter"
+				/>
+			</label>
+			<div class="view-toggle" role="group" aria-label="View">
+				<a href={ SafeURL(p.Q.Href("tiles")) } class={ templ.KV("active", p.Q.View == "tiles") } title="Tiles">
+					@Icon("tiles")
+				</a>
+				<a href={ SafeURL(p.Q.Href("list")) } class={ templ.KV("active", p.Q.View == "list") } title="List">
+					@Icon("list")
+				</a>
+				<a href={ SafeURL(p.Q.Href("summary")) } class={ templ.KV("active", p.Q.View == "summary") } title="Summary">
+					@Icon("pie")
+				</a>
+			</div>
+		</div>
+	</div>
+}
+
+func appsPanelHref(q AppsQuery, panel, app string) string {
+	v := q.Values()
+	v.Set("panel", panel)
+	if app != "" {
+		v.Set("app", app)
+	}
+	return "/ui/applications?" + v.Encode()
+}
+
+// AppsContent is the live part of the applications page.
+templ AppsContent(p AppsPage) {
+	<div id="apps-content" class="content apps-layout">
+		@appsFilters(p)
+		<div class="apps-main">
+			if p.Total == 0 {
+				<div class="empty white-box">
+					@Icon("apps", "empty__icon")
+					<div class="empty__title">No applications available to you just yet</div>
+					<div class="empty__text">Create a new application to start managing Nomad jobs and Consul keys from Git.</div>
+					if p.CanCreate {
+						<a class="btn" href={ SafeURL(appsPanelHref(p.Q, "new", "")) } hx-get={ appsPanelHref(p.Q, "new", "") } hx-target="#panel" hx-push-url="true">
+							@Icon("plus")
+							Create application
+						</a>
+					}
+				</div>
+			} else {
+				<div class="apps-summary-line">
+					if p.Q.Filtered() {
+						<span>Showing { Itoa(len(p.Apps)) } of { Plural(p.Total, "application") }</span>
+						<a href={ SafeURL(AppsQuery{View: p.Q.View}.Href(p.Q.View)) }>Clear filters</a>
+					} else {
+						<span>{ Plural(p.Total, "application") }</span>
+					}
+				</div>
+				if len(p.Apps) == 0 {
+					<div class="empty white-box">
+						@Icon("filter", "empty__icon")
+						<div class="empty__title">No matching applications</div>
+						<div class="empty__text">Change the filters or the search to see more.</div>
+					</div>
+				} else {
+					switch p.Q.View {
+						case "list":
+							@appsList(p)
+						case "summary":
+							@appsSummary(p)
+						default:
+							<div class="tiles">
+								for _, a := range p.Apps {
+									@appTile(p, a)
+								}
+							</div>
+					}
+				}
+			}
+		</div>
+	</div>
+}
+
+templ appsFilters(p AppsPage) {
+	<form id="apps-filter" class="filters" hx-get="/ui/applications" hx-trigger="change" hx-target="#apps-content" hx-swap="outerHTML" hx-push-url="true" hx-include="[name=search]">
+		<input type="hidden" name="view" value={ p.Q.View }/>
+		<div class="filters__head">
+			@Icon("filter")
+			<span>&nbsp;Filters</span>
+			if p.Q.Filtered() {
+				<a class="right" href={ SafeURL(AppsQuery{View: p.Q.View}.Href(p.Q.View)) }>Clear all</a>
+			}
+		</div>
+		<div class="filters__section">
+			<label class="filters__item">
+				<input type="checkbox" name="fav" value="1" checked?={ p.Q.Favorites }/>
+				@Icon("star", "icon--sm")
+				Favorites only
+			</label>
+		</div>
+		@facetSection("Sync status", "sync", p.Facets.Sync, true)
+		@facetSection("Health status", "health", p.Facets.Health, true)
+		<div class="filters__section">
+			<div class="filters__title">Labels</div>
+			<input class="input" name="labels" value={ p.Q.Labels } placeholder="key=value, key2=value2"/>
+		</div>
+		@facetSection("Projects", "proj", p.Facets.Projects, false)
+		@facetSection("Clusters", "cluster", p.Facets.Clusters, false)
+		@facetSection("Namespaces", "ns", p.Facets.Namespaces, false)
+	</form>
+}
+
+templ facetSection(title, name string, facets []Facet, icons bool) {
+	if len(facets) > 0 {
+		<div class="filters__section">
+			<div class="filters__title">{ title }</div>
+			for _, f := range facets {
+				<label class="filters__item">
+					<input type="checkbox" name={ name } value={ f.Value } checked?={ f.Checked }/>
+					if icons {
+						@StatusIcon(f.Value, "icon--sm")
+					}
+					<span class="truncate">{ f.Value }</span>
+					<span class="count">{ Itoa(f.Count) }</span>
+				</label>
+			}
+		</div>
+	}
+}
+
+// FavStar toggles an application's favourite mark.
+templ FavStar(name string, on bool) {
+	<button class={ "star", templ.KV("star--on", on) } type="button" hx-post={ AppHref(name) + "/favorite" } hx-swap="outerHTML" title={ favTitle(on) } aria-pressed={ strconv.FormatBool(on) }>
+		@Icon("star")
+	</button>
+}
+
+func favTitle(on bool) string {
+	if on {
+		return "Remove from favorites"
+	}
+	return "Add to favorites"
+}
+
+templ appTile(p AppsPage, a *v1.Application) {
+	<div class={ "tile", "tile--" + HealthOf(a) }>
+		<a class="tile__link" href={ SafeURL(AppHref(a.Metadata.Name)) } aria-label={ "Open " + a.Metadata.Name }></a>
+		<div class="tile__head">
+			@Icon("apps", "tile__icon")
+			<a class="tile__title" href={ SafeURL(AppHref(a.Metadata.Name)) } title={ a.Metadata.Name }>{ a.Metadata.Name }</a>
+			@FavStar(a.Metadata.Name, p.Favorites[a.Metadata.Name])
+		</div>
+		<div class="tile__rows">
+			<div class="tile__label">Project:</div>
+			<div class="tile__value">{ a.Spec.Project }</div>
+			<div class="tile__label">Labels:</div>
+			<div class="tile__value">
+				<div class="tags">
+					for _, l := range Labels(a.Metadata.Labels) {
+						<span class="tag" title={ l }>{ l }</span>
+					}
+				</div>
+			</div>
+			<div class="tile__label">Status:</div>
+			<div class="tile__value">
+				@HealthStatus(HealthOf(a), a.Status.Health.Message)
+				@SyncStatus(SyncOf(a))
+				if a.Operation != nil || (a.Status.OperationState != nil && !a.Status.OperationState.Phase.Completed()) {
+					<span class="status st-Running">
+						@StatusIcon("Running")
+						Syncing
+					</span>
+				}
+			</div>
+			<div class="tile__label">Repository:</div>
+			<div class="tile__value" title={ a.Spec.Source.RepoURL }>{ a.Spec.Source.RepoURL }</div>
+			<div class="tile__label">Target Revision:</div>
+			<div class="tile__value">{ a.Spec.Source.Revision() }</div>
+			if a.Spec.Source.Path != "" {
+				<div class="tile__label">Path:</div>
+				<div class="tile__value" title={ a.Spec.Source.Path }>{ a.Spec.Source.Path }</div>
+			}
+			<div class="tile__label">Destination:</div>
+			<div class="tile__value">{ Destination(a.Spec.Destination) }</div>
+			<div class="tile__label">Namespace:</div>
+			<div class="tile__value">{ a.Spec.Destination.NamespaceOrDefault() }</div>
+			if a.Metadata.CreationTimestamp != nil {
+				<div class="tile__label">Created At:</div>
+				<div class="tile__value" title={ TimestampPtr(a.Metadata.CreationTimestamp) }>{ AgoPtr(a.Metadata.CreationTimestamp) }</div>
+			}
+			if a.Status.OperationState != nil && a.Status.OperationState.FinishedAt != nil {
+				<div class="tile__label">Last Sync:</div>
+				<div class="tile__value" title={ TimestampPtr(a.Status.OperationState.FinishedAt) }>
+					<span class="status">
+						@StatusIcon(string(a.Status.OperationState.Phase), "icon--sm")
+						{ AgoPtr(a.Status.OperationState.FinishedAt) }
+					</span>
+				</div>
+			}
+		</div>
+		<div class="tile__actions">
+			<a class="btn btn--sm" href={ SafeURL(appsPanelHref(p.Q, "sync", a.Metadata.Name)) } hx-get={ appsPanelHref(p.Q, "sync", a.Metadata.Name) } hx-target="#panel" hx-push-url="true">
+				@Icon("sync", "icon--sm")
+				Sync
+			</a>
+			<button class="btn btn--sm btn--outline" type="button" hx-post={ AppHref(a.Metadata.Name) + "/refresh" } hx-swap="none">
+				@Icon("refresh", "icon--sm")
+				Refresh
+			</button>
+			<a class="btn btn--sm btn--outline" href={ SafeURL(appsPanelHref(p.Q, "delete", a.Metadata.Name)) } hx-get={ appsPanelHref(p.Q, "delete", a.Metadata.Name) } hx-target="#panel" hx-push-url="true">
+				@Icon("trash", "icon--sm")
+				Delete
+			</a>
+		</div>
+	</div>
+}
+
+templ appsList(p AppsPage) {
+	<table class="table apps-table">
+		<thead>
+			<tr>
+				<th>Name</th>
+				<th>Project</th>
+				<th>Status</th>
+				<th>Repository</th>
+				<th>Revision</th>
+				<th>Destination</th>
+				<th>Last sync</th>
+				<th></th>
+			</tr>
+		</thead>
+		<tbody>
+			for _, a := range p.Apps {
+				<tr class={ "row--" + HealthOf(a) }>
+					<td class="apps-table__name">
+						<div class="flex">
+							@FavStar(a.Metadata.Name, p.Favorites[a.Metadata.Name])
+							<a href={ SafeURL(AppHref(a.Metadata.Name)) }>{ a.Metadata.Name }</a>
+						</div>
+					</td>
+					<td>{ a.Spec.Project }</td>
+					<td class="status-cell">
+						@HealthStatus(HealthOf(a), a.Status.Health.Message)
+						@SyncStatus(SyncOf(a))
+					</td>
+					<td class="truncate" style="max-width:320px" title={ a.Spec.Source.RepoURL }>
+						{ a.Spec.Source.RepoURL }
+						if a.Spec.Source.Path != "" {
+							<span class="faint">/{ a.Spec.Source.Path }</span>
+						}
+					</td>
+					<td>{ a.Spec.Source.Revision() }</td>
+					<td>{ Destination(a.Spec.Destination) } <span class="faint">/ { a.Spec.Destination.NamespaceOrDefault() }</span></td>
+					<td class="nowrap">
+						if a.Status.OperationState != nil && a.Status.OperationState.FinishedAt != nil {
+							<span class="status">
+								@StatusIcon(string(a.Status.OperationState.Phase), "icon--sm")
+								{ AgoPtr(a.Status.OperationState.FinishedAt) }
+							</span>
+						}
+					</td>
+					<td class="table__actions">
+						@appMenu(p.Q, a.Metadata.Name)
+					</td>
+				</tr>
+			}
+		</tbody>
+	</table>
+}
+
+templ appMenu(q AppsQuery, name string) {
+	<details class="menu">
+		<summary aria-label="Actions">
+			@Icon("dots")
+		</summary>
+		<div class="menu__list">
+			<a class="menu__item" href={ SafeURL(appsPanelHref(q, "sync", name)) } hx-get={ appsPanelHref(q, "sync", name) } hx-target="#panel" hx-push-url="true">
+				@Icon("sync", "icon--sm")
+				Sync
+			</a>
+			<button class="menu__item" type="button" hx-post={ AppHref(name) + "/refresh" } hx-swap="none">
+				@Icon("refresh", "icon--sm")
+				Refresh
+			</button>
+			<div class="menu__sep"></div>
+			<a class="menu__item menu__item--danger" href={ SafeURL(appsPanelHref(q, "delete", name)) } hx-get={ appsPanelHref(q, "delete", name) } hx-target="#panel" hx-push-url="true">
+				@Icon("trash", "icon--sm")
+				Delete
+			</a>
+		</div>
+	</details>
+}
+
+// DonutSlice is one segment of a summary chart.
+type DonutSlice struct {
+	Label string
+	Count int
+}
+
+func countBy(apps []*v1.Application, key func(*v1.Application) string, order []string) []DonutSlice {
+	counts := map[string]int{}
+	for _, a := range apps {
+		counts[key(a)]++
+	}
+	var out []DonutSlice
+	for _, k := range order {
+		if counts[k] > 0 {
+			out = append(out, DonutSlice{Label: k, Count: counts[k]})
+		}
+	}
+	return out
+}
+
+var healthOrder = []string{"Healthy", "Progressing", "Suspended", "Degraded", "Missing", "Unknown"}
+var syncOrder = []string{"Synced", "OutOfSync", "Unknown"}
+
+templ appsSummary(p AppsPage) {
+	<div class="summary-grid">
+		<div class="white-box">
+			<div class="white-box__title">Applications</div>
+			<div class="big-number">{ Itoa(len(p.Apps)) }</div>
+			<div class="muted">
+				{ Plural(countProjects(p.Apps), "project") }, { Plural(countClusters(p.Apps), "cluster") }
+			</div>
+		</div>
+		<div class="white-box">
+			<div class="white-box__title">Health</div>
+			@donut(countBy(p.Apps, HealthOf, healthOrder), len(p.Apps), "apps")
+		</div>
+		<div class="white-box">
+			<div class="white-box__title">Sync</div>
+			@donut(countBy(p.Apps, SyncOf, syncOrder), len(p.Apps), "apps")
+		</div>
+		<div class="white-box">
+			<div class="white-box__title">Auto sync</div>
+			@donut(countBy(p.Apps, autoSyncLabel, []string{"Automated", "Manual"}), len(p.Apps), "apps")
+		</div>
+	</div>
+}
+
+func autoSyncLabel(a *v1.Application) string {
+	if a.Spec.SyncPolicy.IsAutomated() {
+		return "Automated"
+	}
+	return "Manual"
+}
+
+func countProjects(apps []*v1.Application) int {
+	m := map[string]bool{}
+	for _, a := range apps {
+		m[a.Spec.Project] = true
+	}
+	return len(m)
+}
+
+func countClusters(apps []*v1.Application) int {
+	m := map[string]bool{}
+	for _, a := range apps {
+		m[a.Spec.Destination.ClusterName()] = true
+	}
+	return len(m)
+}
+
+// donut draws a ring chart with stroke-dasharray segments (r=60, so the
+// circumference is 2π·60).
+templ donut(slices []DonutSlice, total int, caption string) {
+	<div class="donut">
+		<svg viewBox="0 0 160 160" role="img" aria-label={ caption }>
+			<circle cx="80" cy="80" r="60" fill="none" stroke-width="22" style="stroke: var(--surface-hover)"></circle>
+			for i, s := range slices {
+				<circle
+					class={ "st-" + s.Label, "donut__seg" }
+					cx="80"
+					cy="80"
+					r="60"
+					fill="none"
+					stroke-width="22"
+					style="stroke: currentColor"
+					stroke-dasharray={ dash(s.Count, total) }
+					stroke-dashoffset={ dashOffset(slices, i, total) }
+					transform="rotate(-90 80 80)"
+				>
+					<title>{ s.Label }: { Itoa(s.Count) }</title>
+				</circle>
+			}
+			<text class="donut__total" x="80" y="84" text-anchor="middle">{ Itoa(total) }</text>
+			<text class="donut__caption" x="80" y="102" text-anchor="middle">{ caption }</text>
+		</svg>
+		<ul class="legend">
+			for _, s := range slices {
+				<li>
+					@StatusIcon(s.Label, "icon--sm")
+					<span>{ s.Label }</span>
+					<span class="legend__count">{ Itoa(s.Count) }</span>
+				</li>
+			}
+		</ul>
+	</div>
+}
+
+const circumference = 376.99
+
+func dash(n, total int) string {
+	if total == 0 {
+		return "0 " + strconv.FormatFloat(circumference, 'f', 2, 64)
+	}
+	l := circumference * float64(n) / float64(total)
+	return strconv.FormatFloat(l, 'f', 2, 64) + " " + strconv.FormatFloat(circumference-l, 'f', 2, 64)
+}
+
+func dashOffset(slices []DonutSlice, i, total int) string {
+	if total == 0 {
+		return "0"
+	}
+	sum := 0
+	for _, s := range slices[:i] {
+		sum += s.Count
+	}
+	return strconv.FormatFloat(-circumference*float64(sum)/float64(total), 'f', 2, 64)
+}
+
+// SyncAppsPanel syncs several applications at once.
+templ SyncAppsPanel(apps []*v1.Application, closeHref, errMsg string, refresh bool) {
+	@PanelFrame(syncAppsTitle(refresh), syncAppsIcon(refresh), closeHref, true, nil) {
+		<form class="form" hx-post={ syncAppsAction(refresh) } hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+			<input type="hidden" name="close" value={ closeHref }/>
+			if errMsg != "" {
+				@LoginError(errMsg)
+			}
+			<div class="form-section">
+				<div class="form-section__title">Applications</div>
+				if len(apps) == 0 {
+					<div class="muted">No applications match the current filters.</div>
+				} else {
+					<div class="checks checks--column">
+						for _, a := range apps {
+							<label class="check">
+								<input type="checkbox" name="app" value={ a.Metadata.Name } checked/>
+								@StatusIcon(HealthOf(a), "icon--sm")
+								@StatusIcon(SyncOf(a), "icon--sm")
+								<span>{ a.Metadata.Name }</span>
+								<span class="faint small">{ a.Spec.Project }</span>
+							</label>
+						}
+					</div>
+				}
+			</div>
+			if refresh {
+				<div class="form-section">
+					<div class="form-section__title">Refresh type</div>
+					<div class="checks">
+						<label class="check"><input type="radio" name="mode" value="normal" checked/> Normal</label>
+						<label class="check"><input type="radio" name="mode" value="hard"/> Hard (re-read the repository)</label>
+					</div>
+				</div>
+			} else {
+				<div class="form-section">
+					<div class="form-section__title">Options</div>
+					<div class="checks">
+						<label class="check check--upper"><input type="checkbox" name="prune" value="true"/> Prune</label>
+						<label class="check check--upper"><input type="checkbox" name="dryRun" value="true"/> Dry run</label>
+						for _, o := range SyncOptionChoices {
+							<label class="check check--upper" title={ o.Help }><input type="checkbox" name="syncOption" value={ o.Option }/> { o.Label }</label>
+						}
+					</div>
+				</div>
+			}
+			<div class="flex">
+				<button class="btn" type="submit">
+					if refresh {
+						@Icon("refresh")
+						Refresh
+					} else {
+						@Icon("sync")
+						Sync
+					}
+				</button>
+				<a class="btn btn--outline" href={ SafeURL(closeHref) } hx-get={ closeHref } hx-target="#panel" hx-push-url="true">Cancel</a>
+			</div>
+		</form>
+	}
+}
+
+func syncAppsTitle(refresh bool) string {
+	if refresh {
+		return "Refresh applications"
+	}
+	return "Sync applications"
+}
+
+func syncAppsIcon(refresh bool) string {
+	if refresh {
+		return "refresh"
+	}
+	return "sync"
+}
+
+func syncAppsAction(refresh bool) string {
+	if refresh {
+		return "/ui/applications/refresh"
+	}
+	return "/ui/applications/sync"
+}
+
+func queryEscape(s string) string { return url.QueryEscape(s) }

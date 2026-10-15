@@ -25,7 +25,7 @@ func (s *Server) handleStreamApps(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	match := listFilter(r)
+	match := listFilter(r.URL.Query())
 	visible := map[string]bool{}
 	events := s.Store.WatchApplications(r.Context())
 	heartbeat := time.NewTicker(15 * time.Second)

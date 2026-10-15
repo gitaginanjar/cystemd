@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,6 +17,10 @@ import (
 	"github.com/gitaginanjar/cystemd/internal/store"
 	v1 "github.com/gitaginanjar/cystemd/pkg/apis/v1alpha1"
 )
+
+// Application operations are shared by the JSON API (handle*) and the web
+// UI: each takes the request (context, caller, client address for the
+// audit) and returns an error errorCode maps to an HTTP status.
 
 func withIdentity(r *http.Request, id *auth.Identity) context.Context {
 	return context.WithValue(r.Context(), identityKey{}, id)
@@ -28,8 +33,7 @@ type ApplicationList struct {
 
 // listFilter selects Applications from query parameters: search (name
 // substring), projects (comma list), selector (key=value labels).
-func listFilter(r *http.Request) func(*v1.Application) bool {
-	q := r.URL.Query()
+func listFilter(q url.Values) func(*v1.Application) bool {
 	search := strings.ToLower(q.Get("search"))
 	projects := map[string]bool{}
 	for _, p := range strings.Split(q.Get("projects"), ",") {
@@ -68,40 +72,56 @@ func (s *Server) visible(r *http.Request, a *v1.Application) bool {
 	return s.RBAC.Enforce(id.Username, id.Groups, "applications", "get", appObject(a))
 }
 
-func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
+// listApps returns the Applications the caller may see that match.
+func (s *Server) listApps(r *http.Request, match func(*v1.Application) bool) ([]*v1.Application, error) {
 	apps, err := s.Store.ListApplications(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	out := []*v1.Application{}
+	for _, a := range apps {
+		if (match == nil || match(a)) && s.visible(r, a) {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
+	apps, err := s.listApps(r, listFilter(r.URL.Query()))
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	match := listFilter(r)
-	out := []*v1.Application{}
-	for _, a := range apps {
-		if match(a) && s.visible(r, a) {
-			out = append(out, a)
-		}
-	}
-	writeJSON(w, http.StatusOK, ApplicationList{Items: out})
+	writeJSON(w, http.StatusOK, ApplicationList{Items: apps})
 }
 
-// getApp loads an Application and checks the caller may perform action.
-func (s *Server) getApp(w http.ResponseWriter, r *http.Request, action string) *v1.Application {
-	name := r.PathValue("name")
+// loadApp returns the named Application when the caller may see it and
+// perform action on it. A hidden Application reads as not found.
+func (s *Server) loadApp(r *http.Request, name, action string) (*v1.Application, error) {
 	app, err := s.Store.GetApplication(r.Context(), name)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			// Same answer whether it does not exist or is not visible.
-			writeError(w, http.StatusNotFound, fmt.Sprintf("application %q not found", name))
-			return nil
+			return nil, notFound("application %q not found", name)
 		}
-		s.fail(w, err)
-		return nil
+		return nil, err
 	}
 	if !s.visible(r, app) {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("application %q not found", name))
-		return nil
+		return nil, notFound("application %q not found", name)
 	}
-	if action != "get" && !s.can(w, r, "applications", action, appObject(app)) {
+	if action != "get" {
+		if err := s.authorize(r, "applications", action, appObject(app)); err != nil {
+			return nil, err
+		}
+	}
+	return app, nil
+}
+
+// getApp is loadApp for JSON handlers: it writes the error itself.
+func (s *Server) getApp(w http.ResponseWriter, r *http.Request, action string) *v1.Application {
+	app, err := s.loadApp(r, r.PathValue("name"), action)
+	if err != nil {
+		s.fail(w, err)
 		return nil
 	}
 	return app
@@ -113,23 +133,36 @@ func (s *Server) handleGetApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if refresh := r.URL.Query().Get("refresh"); refresh == "normal" || refresh == "hard" {
-		updated, err := s.Store.MutateApplication(r.Context(), app.Metadata.Name, func(a *v1.Application) error {
-			if a.Metadata.Annotations == nil {
-				a.Metadata.Annotations = map[string]string{}
-			}
-			a.Metadata.Annotations[controller.RefreshAnnotation] = refresh
-			return nil
-		})
+		updated, err := s.refreshApp(r, app, refresh)
 		if err != nil {
 			s.fail(w, err)
 			return
 		}
-		if refresh == "hard" && s.Repos != nil {
-			s.Repos.InvalidateRevision(app.Spec.Source.RepoURL)
-		}
 		app = updated
 	}
 	writeJSON(w, http.StatusOK, app)
+}
+
+// refreshApp asks the controller to re-compare the Application now; a hard
+// refresh also drops the cached revision and manifests of its repository.
+func (s *Server) refreshApp(r *http.Request, app *v1.Application, mode string) (*v1.Application, error) {
+	if mode != "hard" {
+		mode = "normal"
+	}
+	updated, err := s.Store.MutateApplication(r.Context(), app.Metadata.Name, func(a *v1.Application) error {
+		if a.Metadata.Annotations == nil {
+			a.Metadata.Annotations = map[string]string{}
+		}
+		a.Metadata.Annotations[controller.RefreshAnnotation] = mode
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if mode == "hard" && s.Repos != nil {
+		s.Repos.InvalidateRevision(app.Spec.Source.RepoURL)
+	}
+	return updated, nil
 }
 
 // checkProject validates the spec against its project.
@@ -154,31 +187,26 @@ func (s *Server) checkProject(ctx context.Context, app *v1.Application) error {
 	return nil
 }
 
-func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
-	var app v1.Application
-	if err := decode(r, &app); err != nil {
-		s.fail(w, err)
-		return
-	}
+// createApp creates app; with upsert an existing Application's spec,
+// labels and annotations are replaced instead.
+func (s *Server) createApp(r *http.Request, app *v1.Application, upsert bool) (*v1.Application, error) {
 	app.SetDefaults()
 	app.Status = v1.ApplicationStatus{}
 	app.Operation = nil
 	app.Metadata.DeletionTimestamp = nil
 	if err := app.Validate(); err != nil {
-		s.fail(w, badRequest("%v", err))
-		return
+		return nil, badRequest("%v", err)
 	}
-	if !s.can(w, r, "applications", "create", appObject(&app)) {
-		return
+	if err := s.authorize(r, "applications", "create", appObject(app)); err != nil {
+		return nil, err
 	}
-	if err := s.checkProject(r.Context(), &app); err != nil {
-		s.fail(w, err)
-		return
+	if err := s.checkProject(r.Context(), app); err != nil {
+		return nil, err
 	}
-	created, err := s.Store.CreateApplication(r.Context(), &app)
-	if errors.Is(err, store.ErrExists) && r.URL.Query().Get("upsert") == "true" {
-		if !s.can(w, r, "applications", "update", appObject(&app)) {
-			return
+	created, err := s.Store.CreateApplication(r.Context(), app)
+	if errors.Is(err, store.ErrExists) && upsert {
+		if err := s.authorize(r, "applications", "update", appObject(app)); err != nil {
+			return nil, err
 		}
 		created, err = s.Store.MutateApplication(r.Context(), app.Metadata.Name, func(a *v1.Application) error {
 			a.Spec = app.Spec
@@ -188,39 +216,44 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if errors.Is(err, store.ErrExists) {
-			s.fail(w, fmt.Errorf("%w: application %q already exists", store.ErrExists, app.Metadata.Name))
-			return
+			return nil, fmt.Errorf("%w: application %q already exists", store.ErrExists, app.Metadata.Name)
 		}
-		s.fail(w, err)
-		return
+		return nil, err
 	}
 	s.audit(r, "applications/create", appObject(created), "ALLOWED", "")
 	s.event(r, created, "ResourceCreated", "created application")
+	return created, nil
+}
+
+func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
+	var app v1.Application
+	if err := decode(r, &app); err != nil {
+		s.fail(w, err)
+		return
+	}
+	created, err := s.createApp(r, &app, r.URL.Query().Get("upsert") == "true")
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, created)
 }
 
-func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
-	cur := s.getApp(w, r, "update")
-	if cur == nil {
-		return
-	}
-	var in v1.Application
-	if err := decode(r, &in); err != nil {
-		s.fail(w, err)
-		return
-	}
+// updateApp replaces cur's spec, labels and annotations with in's. A
+// resourceVersion on in makes the write conditional on it.
+func (s *Server) updateApp(r *http.Request, cur, in *v1.Application) (*v1.Application, error) {
 	in.Metadata.Name = cur.Metadata.Name
 	in.SetDefaults()
 	if err := in.Validate(); err != nil {
-		s.fail(w, badRequest("%v", err))
-		return
+		return nil, badRequest("%v", err)
 	}
-	if in.Spec.Project != cur.Spec.Project && !s.can(w, r, "applications", "update", appObject(&in)) {
-		return
+	if in.Spec.Project != cur.Spec.Project {
+		if err := s.authorize(r, "applications", "update", appObject(in)); err != nil {
+			return nil, err
+		}
 	}
-	if err := s.checkProject(r.Context(), &in); err != nil {
-		s.fail(w, err)
-		return
+	if err := s.checkProject(r.Context(), in); err != nil {
+		return nil, err
 	}
 	update := func(a *v1.Application) {
 		a.Spec = in.Spec
@@ -239,28 +272,40 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		out, err = s.Store.MutateApplication(r.Context(), cur.Metadata.Name, func(a *v1.Application) error { update(a); return nil })
 	}
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, err
 	}
 	s.audit(r, "applications/update", appObject(out), "ALLOWED", "")
 	s.event(r, out, "ResourceUpdated", "updated application spec")
+	return out, nil
+}
+
+func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
+	cur := s.getApp(w, r, "update")
+	if cur == nil {
+		return
+	}
+	var in v1.Application
+	if err := decode(r, &in); err != nil {
+		s.fail(w, err)
+		return
+	}
+	out, err := s.updateApp(r, cur, &in)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
-	app := s.getApp(w, r, "delete")
-	if app == nil {
-		return
-	}
-	cascade := r.URL.Query().Get("cascade") != "false"
+// deleteApp deletes app. Cascading (the default) marks it for deletion:
+// the controller deletes its jobs and keys, then the Application.
+func (s *Server) deleteApp(r *http.Request, app *v1.Application, cascade bool) error {
 	if !cascade {
 		if err := s.Store.DeleteApplication(r.Context(), app.Metadata.Name); err != nil {
-			s.fail(w, err)
-			return
+			return err
 		}
 		s.audit(r, "applications/delete", appObject(app), "ALLOWED", "non-cascading: jobs and keys are left running")
-		writeJSON(w, http.StatusOK, map[string]any{})
-		return
+		return nil
 	}
 	_, err := s.Store.MutateApplication(r.Context(), app.Metadata.Name, func(a *v1.Application) error {
 		now := time.Now().UTC().Truncate(time.Second)
@@ -271,10 +316,21 @@ func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		return err
+	}
+	s.audit(r, "applications/delete", appObject(app), "ALLOWED", "cascade")
+	return nil
+}
+
+func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
+	app := s.getApp(w, r, "delete")
+	if app == nil {
+		return
+	}
+	if err := s.deleteApp(r, app, r.URL.Query().Get("cascade") != "false"); err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.audit(r, "applications/delete", appObject(app), "ALLOWED", "cascade")
 	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
@@ -291,7 +347,7 @@ type SyncRequest struct {
 	Source *v1.ApplicationSource `json:"source,omitempty"`
 }
 
-func (s *Server) requestOperation(w http.ResponseWriter, r *http.Request, app *v1.Application, op *v1.Operation, describe string) {
+func (s *Server) requestOperation(r *http.Request, app *v1.Application, op *v1.Operation, describe string) (*v1.Application, error) {
 	updated, err := s.Store.MutateApplication(r.Context(), app.Metadata.Name, func(a *v1.Application) error {
 		if a.Operation != nil {
 			return fmt.Errorf("%w: another operation is already in progress", store.ErrConflict)
@@ -303,28 +359,19 @@ func (s *Server) requestOperation(w http.ResponseWriter, r *http.Request, app *v
 		return nil
 	})
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, err
 	}
 	// The controller records OperationStarted when it picks the request up.
 	s.audit(r, "applications/sync", appObject(app), "ALLOWED", describe)
-	writeJSON(w, http.StatusOK, updated)
+	return updated, nil
 }
 
-func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
-	app := s.getApp(w, r, "sync")
-	if app == nil {
-		return
-	}
-	var req SyncRequest
-	if r.ContentLength != 0 {
-		if err := decode(r, &req); err != nil {
-			s.fail(w, err)
-			return
+// syncApp requests a sync operation (needs "sync" on the Application).
+func (s *Server) syncApp(r *http.Request, app *v1.Application, req SyncRequest) (*v1.Application, error) {
+	if req.Source != nil {
+		if err := s.authorize(r, "applications", "override", appObject(app)); err != nil {
+			return nil, err
 		}
-	}
-	if req.Source != nil && !s.can(w, r, "applications", "override", appObject(app)) {
-		return
 	}
 	id := identity(r)
 	op := &v1.Operation{
@@ -340,7 +387,27 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	if rev == "" {
 		rev = app.Spec.Source.Revision()
 	}
-	s.requestOperation(w, r, app, op, fmt.Sprintf("%s initiated sync to %s", id.Username, rev))
+	return s.requestOperation(r, app, op, fmt.Sprintf("%s initiated sync to %s", id.Username, rev))
+}
+
+func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
+	app := s.getApp(w, r, "sync")
+	if app == nil {
+		return
+	}
+	var req SyncRequest
+	if r.ContentLength != 0 {
+		if err := decode(r, &req); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+	out, err := s.syncApp(r, app, req)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // RollbackRequest is the rollback body.
@@ -348,6 +415,26 @@ type RollbackRequest struct {
 	ID     int64 `json:"id"`
 	Prune  bool  `json:"prune"`
 	DryRun bool  `json:"dryRun"`
+}
+
+// rollbackApp requests a rollback to a history entry's job versions.
+func (s *Server) rollbackApp(r *http.Request, app *v1.Application, req RollbackRequest) (*v1.Application, error) {
+	if app.Spec.SyncPolicy.IsAutomated() {
+		return nil, badRequest("rollback cannot be initiated when auto-sync is enabled")
+	}
+	found := false
+	for _, h := range app.Status.History {
+		found = found || h.ID == req.ID
+	}
+	if !found {
+		return nil, badRequest("history entry %d not found", req.ID)
+	}
+	id := identity(r)
+	op := &v1.Operation{
+		Sync:        &v1.SyncOperation{RollbackID: &req.ID, Prune: req.Prune, DryRun: req.DryRun},
+		InitiatedBy: v1.OperationInitiator{Username: id.Username},
+	}
+	return s.requestOperation(r, app, op, fmt.Sprintf("%s initiated rollback to %d", id.Username, req.ID))
 }
 
 func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
@@ -360,31 +447,17 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if app.Spec.SyncPolicy.IsAutomated() {
-		writeError(w, http.StatusBadRequest, "rollback cannot be initiated when auto-sync is enabled")
+	out, err := s.rollbackApp(r, app, req)
+	if err != nil {
+		s.fail(w, err)
 		return
 	}
-	found := false
-	for _, h := range app.Status.History {
-		found = found || h.ID == req.ID
-	}
-	if !found {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("history entry %d not found", req.ID))
-		return
-	}
-	id := identity(r)
-	op := &v1.Operation{
-		Sync:        &v1.SyncOperation{RollbackID: &req.ID, Prune: req.Prune, DryRun: req.DryRun},
-		InitiatedBy: v1.OperationInitiator{Username: id.Username},
-	}
-	s.requestOperation(w, r, app, op, fmt.Sprintf("%s initiated rollback to %d", id.Username, req.ID))
+	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) handleTerminate(w http.ResponseWriter, r *http.Request) {
-	app := s.getApp(w, r, "sync")
-	if app == nil {
-		return
-	}
+// terminateOperation stops the running operation (or drops a requested one
+// the controller has not picked up yet).
+func (s *Server) terminateOperation(r *http.Request, app *v1.Application) (*v1.Application, error) {
 	updated, err := s.Store.MutateApplication(r.Context(), app.Metadata.Name, func(a *v1.Application) error {
 		os := a.Status.OperationState
 		switch {
@@ -398,11 +471,38 @@ func (s *Server) handleTerminate(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	s.audit(r, "applications/terminate-op", appObject(app), "ALLOWED", "")
+	return updated, nil
+}
+
+func (s *Server) handleTerminate(w http.ResponseWriter, r *http.Request) {
+	app := s.getApp(w, r, "sync")
+	if app == nil {
+		return
+	}
+	out, err := s.terminateOperation(r, app)
+	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.audit(r, "applications/terminate-op", appObject(app), "ALLOWED", "")
-	writeJSON(w, http.StatusOK, updated)
+	writeJSON(w, http.StatusOK, out)
+}
+
+// appEvents lists the Application's events, optionally for one resource.
+func (s *Server) appEvents(r *http.Request, app *v1.Application, kind, name string) ([]v1.Event, error) {
+	events, err := s.Store.ListEvents(r.Context(), app.Metadata.Name)
+	if err != nil {
+		return nil, err
+	}
+	out := []v1.Event{}
+	for _, e := range events {
+		if (kind == "" || e.Kind == kind) && (name == "" || e.Name == name) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -410,17 +510,10 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if app == nil {
 		return
 	}
-	events, err := s.Store.ListEvents(r.Context(), app.Metadata.Name)
+	out, err := s.appEvents(r, app, r.URL.Query().Get("resourceKind"), r.URL.Query().Get("resourceName"))
 	if err != nil {
 		s.fail(w, err)
 		return
-	}
-	kind, name := r.URL.Query().Get("resourceKind"), r.URL.Query().Get("resourceName")
-	out := []v1.Event{}
-	for _, e := range events {
-		if (kind == "" || e.Kind == kind) && (name == "" || e.Name == name) {
-			out = append(out, e)
-		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
@@ -453,36 +546,43 @@ type ManifestResponse struct {
 	SourceType v1.SourceType `json:"sourceType"`
 }
 
-func (s *Server) handleManifests(w http.ResponseWriter, r *http.Request) {
-	app := s.getApp(w, r, "get")
-	if app == nil {
-		return
-	}
-	rev := r.URL.Query().Get("revision")
+// appManifests renders the Application's source at rev (default: its
+// target revision).
+func (s *Server) appManifests(r *http.Request, app *v1.Application, rev string) (*ManifestResponse, error) {
 	if rev == "" {
 		rev = app.Spec.Source.Revision()
 	}
 	sha, err := s.Repos.Resolve(r.Context(), app.Spec.Source.RepoURL, rev)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, err
 	}
 	m, err := s.Repos.Manifests(r.Context(), app, app.Spec.Source, sha, false)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, err
 	}
-	out := ManifestResponse{Revision: sha, SourceType: m.SourceType, Manifests: []string{}}
+	out := &ManifestResponse{Revision: sha, SourceType: m.SourceType, Manifests: []string{}}
 	for _, j := range m.Jobs {
 		y, err := jobYAML(j)
 		if err != nil {
-			s.fail(w, err)
-			return
+			return nil, err
 		}
 		out.Manifests = append(out.Manifests, y)
 	}
 	for _, kv := range m.KV {
 		out.Manifests = append(out.Manifests, fmt.Sprintf("# Consul key %s\n%s", kv.Key, kv.Value))
+	}
+	return out, nil
+}
+
+func (s *Server) handleManifests(w http.ResponseWriter, r *http.Request) {
+	app := s.getApp(w, r, "get")
+	if app == nil {
+		return
+	}
+	out, err := s.appManifests(r, app, r.URL.Query().Get("revision"))
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }

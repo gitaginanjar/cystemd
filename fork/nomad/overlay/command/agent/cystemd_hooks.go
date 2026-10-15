@@ -107,9 +107,10 @@ var (
 	extensionsMu   sync.Mutex
 	httpExtensions []HTTPExtension
 
-	// UIFileSystem, when non-nil, replaces the Nomad web UI served under
-	// /ui/. Unknown paths fall back to index.html (single-page application).
-	UIFileSystem http.FileSystem
+	// UIHandler, when non-nil, replaces the Nomad web UI: it receives every
+	// request under /ui/ (full path, prefix not stripped), wrapped with the
+	// agent's ui.content_security_policy header.
+	UIHandler http.Handler
 )
 
 // RegisterHTTPExtension adds e to the extensions mounted on every HTTP
@@ -138,16 +139,4 @@ func shutdownHTTPExtensions() {
 	for _, e := range registeredHTTPExtensions() {
 		e.Shutdown()
 	}
-}
-
-// spaFileSystem serves index.html for paths that do not exist, so client-side
-// routes (/ui/applications/foo) survive a page reload.
-type spaFileSystem struct{ fs http.FileSystem }
-
-func (s spaFileSystem) Open(name string) (http.File, error) {
-	f, err := s.fs.Open(name)
-	if err != nil {
-		return s.fs.Open("/index.html")
-	}
-	return f, nil
 }

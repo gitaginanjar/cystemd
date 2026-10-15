@@ -502,3 +502,65 @@ func lcsOps(a, b []string) []lineOp {
 	}
 	return ops
 }
+
+// Line is one line of a structured diff: Op is ' ' (context), '-'
+// (removed), '+' (added) or '@' (a hunk separator, Text says where). A and
+// B are 1-based line numbers in the old and new text (0 when absent).
+type Line struct {
+	Op   byte
+	Text string
+	A, B int
+}
+
+// Lines diffs a → b line by line. With context < 0 every line is returned;
+// otherwise only changes with that many lines around them, hunks separated
+// by '@' lines. It returns nil when the texts are equal.
+func Lines(a, b string, context int) []Line {
+	ops := lcsOps(splitLines(a), splitLines(b))
+	changed := false
+	for _, op := range ops {
+		if op.kind != ' ' {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		return nil
+	}
+	line := func(op lineOp) Line {
+		l := Line{Op: op.kind, Text: op.text}
+		if op.kind != '+' {
+			l.A = op.ai + 1
+		}
+		if op.kind != '-' {
+			l.B = op.bi + 1
+		}
+		return l
+	}
+	var out []Line
+	if context < 0 {
+		for _, op := range ops {
+			out = append(out, line(op))
+		}
+		return out
+	}
+	keep := make([]bool, len(ops))
+	for i, op := range ops {
+		if op.kind == ' ' {
+			continue
+		}
+		for j := max(0, i-context); j <= min(len(ops)-1, i+context); j++ {
+			keep[j] = true
+		}
+	}
+	for i := 0; i < len(ops); i++ {
+		if !keep[i] {
+			continue
+		}
+		if i == 0 || !keep[i-1] {
+			out = append(out, Line{Op: '@', Text: fmt.Sprintf("@@ -%d +%d @@", ops[i].ai+1, ops[i].bi+1)})
+		}
+		out = append(out, line(ops[i]))
+	}
+	return out
+}

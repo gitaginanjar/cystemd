@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,8 +37,6 @@ import (
 type Options struct {
 	Logger *slog.Logger
 	Build  server.BuildInfo
-	// UI is served under /ui/ by the standalone server.
-	UI http.FileSystem
 }
 
 // ControlPlane is a running control plane.
@@ -206,7 +203,7 @@ func New(ctx context.Context, cfg *config.Config, o Options) (*ControlPlane, err
 	cp.Server = server.New(server.Options{
 		Config: cfg, Store: cp.Store, Auth: am, RBAC: enforcer, Live: live, Repos: repos, Git: gitClient,
 		Clusters: clusters, Vault: vc, Consul: consulClient, Metrics: m, Elector: cp.Elector,
-		Logger: logger, Build: o.Build, UI: o.UI,
+		Logger: logger, Build: o.Build,
 	})
 	return cp, nil
 }

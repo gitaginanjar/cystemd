@@ -115,14 +115,15 @@ func (c *Credentials) remove(ctx context.Context, repoURL string) {
 	}
 }
 
-func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
-	if !s.can(w, r, "repositories", "get", "*") {
-		return
+// listRepos returns the connected repositories, those declared in the
+// server configuration included (needs repositories/get).
+func (s *Server) listRepos(r *http.Request) ([]*v1.Repository, error) {
+	if err := s.authorize(r, "repositories", "get", "*"); err != nil {
+		return nil, err
 	}
 	repos, err := s.Store.ListRepositories(r.Context())
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, err
 	}
 	seen := map[string]bool{}
 	for _, rp := range repos {
@@ -136,32 +137,37 @@ func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 			HasCredentials:  rb.SSHPrivateKeyFile != "" || rb.PasswordFile != "",
 			ConnectionState: v1.ConnectionState{Status: v1.ConnectionUnknown, Message: "declared in the server configuration"}})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": repos})
+	return repos, nil
 }
 
-func (s *Server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
-	var req v1.Repository
-	if err := decode(r, &req); err != nil {
+func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
+	repos, err := s.listRepos(r)
+	if err != nil {
 		s.fail(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": repos})
+}
+
+// createRepo connects a repository after testing the connection (force
+// stores it even when the test fails). Secrets go to Vault or the store and
+// are cleared from the returned value.
+func (s *Server) createRepo(r *http.Request, req *v1.Repository, force bool) (*v1.Repository, error) {
 	req.Repo = strings.TrimSpace(req.Repo)
 	if req.Repo == "" {
-		writeError(w, http.StatusBadRequest, "repo is required")
-		return
+		return nil, badRequest("repo is required")
 	}
-	if !s.can(w, r, "repositories", "create", req.Repo) {
-		return
+	if err := s.authorize(r, "repositories", "create", req.Repo); err != nil {
+		return nil, err
 	}
 	creds := store.RepoCredentials{Username: req.Username, Password: req.Password, SSHPrivateKey: req.SSHPrivateKey}
 	gc := &git.Credentials{Username: req.Username, Password: req.Password, SSHPrivateKey: []byte(req.SSHPrivateKey), Insecure: req.Insecure}
 	now := time.Now().UTC().Truncate(time.Second)
 	req.ConnectionState = v1.ConnectionState{Status: v1.ConnectionSuccessful, AttemptedAt: &now}
 	if err := s.Git.TestConnection(r.Context(), req.Repo, gc); err != nil {
-		if r.URL.Query().Get("force") != "true" {
+		if !force {
 			s.audit(r, "repositories/create", req.Repo, "FAILED", err.Error())
-			writeError(w, http.StatusBadRequest, "unable to connect to repository: "+err.Error())
-			return
+			return nil, badRequest("unable to connect to repository: %v", err)
 		}
 		req.ConnectionState = v1.ConnectionState{Status: v1.ConnectionFailed, Message: err.Error(), AttemptedAt: &now}
 	}
@@ -171,43 +177,65 @@ func (s *Server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 	req.HasCredentials = creds != (store.RepoCredentials{})
 	if req.HasCredentials {
 		if err := s.creds.save(r.Context(), req.Repo, creds); err != nil {
-			s.fail(w, err)
-			return
+			return nil, err
 		}
 	}
-	if err := s.Store.PutRepository(r.Context(), &req); err != nil {
-		s.fail(w, err)
-		return
+	req.Password, req.SSHPrivateKey = "", ""
+	if err := s.Store.PutRepository(r.Context(), req); err != nil {
+		return nil, err
 	}
 	s.audit(r, "repositories/create", req.Repo, "ALLOWED", "")
-	req.Password, req.SSHPrivateKey = "", ""
-	writeJSON(w, http.StatusOK, req)
+	return req, nil
 }
 
-func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
-	repo := r.URL.Query().Get("repo")
-	if !s.can(w, r, "repositories", "delete", repo) {
-		return
-	}
-	if s.creds.staticRepo(repo) != nil {
-		writeError(w, http.StatusBadRequest, "repository is declared in the server configuration")
-		return
-	}
-	if err := s.Store.DeleteRepository(r.Context(), repo); err != nil && !errors.Is(err, store.ErrNotFound) {
+func (s *Server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
+	var req v1.Repository
+	if err := decode(r, &req); err != nil {
 		s.fail(w, err)
 		return
+	}
+	out, err := s.createRepo(r, &req, r.URL.Query().Get("force") == "true")
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// deleteRepo disconnects a repository and removes its stored credentials.
+func (s *Server) deleteRepo(r *http.Request, repo string) error {
+	if err := s.authorize(r, "repositories", "delete", repo); err != nil {
+		return err
+	}
+	if s.creds.staticRepo(repo) != nil {
+		return badRequest("repository is declared in the server configuration")
+	}
+	if err := s.Store.DeleteRepository(r.Context(), repo); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
 	}
 	s.creds.remove(r.Context(), repo)
 	s.audit(r, "repositories/delete", repo, "ALLOWED", "")
+	return nil
+}
+
+func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
+	if err := s.deleteRepo(r, r.URL.Query().Get("repo")); err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
-func (s *Server) handleRepoRefs(w http.ResponseWriter, r *http.Request) {
-	repo := r.URL.Query().Get("repo")
-	if !s.can(w, r, "repositories", "get", repo) {
-		return
+// repoRefs lists a repository's branches and tags.
+func (s *Server) repoRefs(r *http.Request, repo string) (branches, tags []string, err error) {
+	if err := s.authorize(r, "repositories", "get", repo); err != nil {
+		return nil, nil, err
 	}
-	branches, tags, err := s.Git.Refs(r.Context(), repo)
+	return s.Git.Refs(r.Context(), repo)
+}
+
+func (s *Server) handleRepoRefs(w http.ResponseWriter, r *http.Request) {
+	branches, tags, err := s.repoRefs(r, r.URL.Query().Get("repo"))
 	if err != nil {
 		s.fail(w, err)
 		return

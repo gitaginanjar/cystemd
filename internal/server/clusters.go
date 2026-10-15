@@ -30,8 +30,18 @@ type Cluster struct {
 }
 
 func (s *Server) handleListClusters(w http.ResponseWriter, r *http.Request) {
-	if !s.can(w, r, "clusters", "get", "*") {
+	out, err := s.listClusters(r)
+	if err != nil {
+		s.fail(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+// listClusters describes every destination cluster (needs clusters/get).
+func (s *Server) listClusters(r *http.Request) ([]Cluster, error) {
+	if err := s.authorize(r, "clusters", "get", "*"); err != nil {
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -70,7 +80,7 @@ func (s *Server) handleListClusters(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, cl)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	return out, nil
 }
 
 // Node is a Nomad client node.
@@ -88,19 +98,26 @@ type Node struct {
 }
 
 func (s *Server) handleClusterNodes(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if !s.can(w, r, "clusters", "get", name) {
-		return
-	}
-	c, err := s.Clusters.Get(name)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	nodes, err := c.Nodes(r.Context())
+	out, err := s.clusterNodes(r, r.PathValue("name"))
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+// clusterNodes lists a cluster's client nodes (needs clusters/get).
+func (s *Server) clusterNodes(r *http.Request, name string) ([]Node, error) {
+	if err := s.authorize(r, "clusters", "get", name); err != nil {
+		return nil, err
+	}
+	c, err := s.Clusters.Get(name)
+	if err != nil {
+		return nil, notFound("%v", err)
+	}
+	nodes, err := c.Nodes(r.Context())
+	if err != nil {
+		return nil, err
 	}
 	out := []Node{}
 	for _, n := range nodes {
@@ -118,7 +135,7 @@ func (s *Server) handleClusterNodes(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	return out, nil
 }
 
 // handleBadge renders an SVG status badge (Argo CD's /api/badge).

@@ -1,0 +1,775 @@
+// Copyright 2026 G.G (https://github.com/gitaginanjar)
+// SPDX-License-Identifier: Apache-2.0
+
+package views
+
+import (
+	"net/url"
+	"strconv"
+	"strings"
+
+	v1 "github.com/gitaginanjar/cystemd/pkg/apis/v1alpha1"
+)
+
+// SettingsView is the settings index.
+templ SettingsView(p SettingsPage) {
+	@Shell(p.Page, nil, "") {
+		<main class="content">
+			<div class="settings-grid">
+				@settingsTile("/ui/settings/repos", "git", "Repositories", "Connect Git repositories: credentials go to Vault, or the store when Vault is off.")
+				@settingsTile("/ui/settings/projects", "folder", "Projects", "Group applications and restrict their repositories and destinations.")
+				@settingsTile("/ui/settings/clusters", "server", "Clusters", "Nomad clusters applications deploy to, and their client nodes.")
+				@settingsTile("/ui/settings/accounts", "key", "Accounts", "Local accounts that can sign in.")
+				@settingsTile("/ui/settings/appearance", "sun", "Appearance", "Light, dark, or follow the system.")
+			</div>
+			<div class="white-box mt">
+				<div class="white-box__title">
+					@Icon("shield")
+					Control plane
+				</div>
+				<div class="kv">
+					<div class="kv__key">Mode</div>
+					<div>{ p.Mode }</div>
+					<div class="kv__key">Version</div>
+					<div>{ p.Version }</div>
+					<div class="kv__key">Controller</div>
+					<div>
+						if p.Leader {
+							<span class="status">
+								@StatusIcon("Healthy")
+								leader: this replica reconciles applications
+							</span>
+						} else {
+							<span class="status">
+								@StatusIcon("Suspended")
+								standby: another replica holds the lock
+							</span>
+						}
+					</div>
+					for _, h := range p.Health {
+						<div class="kv__key">{ h.Kind }</div>
+						<div>
+							<span class="status">
+								if h.Healthy {
+									@StatusIcon("Healthy")
+								} else {
+									@StatusIcon("Degraded")
+								}
+								<b>{ h.Name }</b>
+							</span>
+							<span class="muted">{ h.Message }</span>
+						</div>
+					}
+				</div>
+			</div>
+		</main>
+	}
+}
+
+templ settingsTile(href, icon, title, text string) {
+	<a class="settings-tile" href={ SafeURL(href) }>
+		<div class="settings-tile__icon">
+			@Icon(icon, "icon--lg")
+		</div>
+		<div>
+			<div class="settings-tile__title">{ title }</div>
+			<div class="settings-tile__text">{ text }</div>
+		</div>
+	</a>
+}
+
+templ pageError(msg string) {
+	if msg != "" {
+		<div class="alert alert--error mb">
+			@StatusIcon("Failed")
+			<div>{ msg }</div>
+		</div>
+	}
+}
+
+// ─── repositories ───────────────────────────────────────────────────────
+
+templ ReposView(p ReposPage) {
+	@Shell(p.Page, reposToolbar(p), "") {
+		<main class="content">
+			@pageError(p.Error)
+			if len(p.Repos) == 0 {
+				<div class="empty white-box">
+					@Icon("git", "empty__icon")
+					<div class="empty__title">No repositories connected</div>
+					<div class="empty__text">Public repositories work without connecting them; connect private ones to store their credentials.</div>
+				</div>
+			} else {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Type</th>
+							<th>Name</th>
+							<th>Repository</th>
+							<th>Credentials</th>
+							<th>Connection status</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, r := range p.Repos {
+							<tr>
+								<td>
+									@Icon("git", "icon--sm")
+									{ or(r.Type, "git") }
+								</td>
+								<td>{ r.Name }</td>
+								<td class="mono">{ r.Repo }</td>
+								<td>
+									if r.HasCredentials {
+										<span class="status">
+											@Icon("lock", "icon--sm")
+											stored
+										</span>
+									} else {
+										<span class="faint">none</span>
+									}
+									if r.Insecure {
+										<span class="tag">insecure</span>
+									}
+								</td>
+								<td>
+									<span class="status" title={ r.ConnectionState.Message }>
+										@StatusIcon(or(r.ConnectionState.Status, "Unknown"), "icon--sm")
+										{ or(r.ConnectionState.Status, "Unknown") }
+									</span>
+									if r.ConnectionState.Message != "" {
+										<div class="faint small truncate" style="max-width:360px" title={ r.ConnectionState.Message }>{ r.ConnectionState.Message }</div>
+									}
+								</td>
+								<td class="table__actions">
+									<details class="menu">
+										<summary aria-label="Actions">
+											@Icon("dots")
+										</summary>
+										<div class="menu__list">
+											<a class="menu__item" href={ SafeURL("/ui/applications?panel=new&repo=" + url.QueryEscape(r.Repo)) }>
+												@Icon("plus", "icon--sm")
+												Create application
+											</a>
+											if p.CanDelete {
+												<div class="menu__sep"></div>
+												<button class="menu__item menu__item--danger" type="button" hx-post={ "/ui/settings/repos/delete?repo=" + url.QueryEscape(r.Repo) } hx-target="body" hx-confirm={ "Disconnect " + r.Repo + "? Its stored credentials are deleted too." }>
+													@Icon("trash", "icon--sm")
+													Disconnect
+												</button>
+											}
+										</div>
+									</details>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</main>
+	}
+}
+
+templ reposToolbar(p ReposPage) {
+	<div class="toolbar">
+		if p.CanCreate {
+			<a class="btn" href="/ui/settings/repos?panel=connect" hx-get="/ui/settings/repos?panel=connect" hx-target="#panel" hx-push-url="true">
+				@Icon("plus")
+				Connect repo
+			</a>
+		}
+		<a class="btn btn--outline" href="/ui/settings/repos">
+			@Icon("refresh")
+			Refresh list
+		</a>
+	</div>
+}
+
+templ ConnectRepoPanelView(p ConnectRepoPanel) {
+	@PanelFrame("Connect repository", "git", p.CloseHref, true, nil) {
+		@panelError(p.Error)
+		<form class="form repo-form" hx-post="/ui/settings/repos" hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+			<div class="form-section">
+				<div class="form-section__title">Choose your connection method</div>
+				<div class="checks">
+					<label class="check"><input type="radio" name="method" value="https" checked?={ p.Form.Method != "ssh" }/> Via HTTPS</label>
+					<label class="check"><input type="radio" name="method" value="ssh" checked?={ p.Form.Method == "ssh" }/> Via SSH</label>
+				</div>
+			</div>
+			<div class="form-section">
+				<div class="form-section__title">Repository</div>
+				<div class="form-grid">
+					<label class="field field--wide">
+						<span class="field__label">Repository URL</span>
+						<input class="input" name="repo" value={ p.Form.Repo } required autocomplete="off" placeholder="https://git.example.com/org/deploy.git or git@git.example.com:org/deploy.git"/>
+					</label>
+					<label class="field">
+						<span class="field__label">Name (optional)</span>
+						<input class="input" name="name" value={ p.Form.Name } autocomplete="off"/>
+					</label>
+					<label class="field">
+						<span class="field__label">Project (optional)</span>
+						<select class="select" name="project">
+							<option value="">—</option>
+							for _, pr := range p.Projects {
+								<option value={ pr } selected?={ pr == p.Form.Project }>{ pr }</option>
+							}
+						</select>
+					</label>
+				</div>
+			</div>
+			<div class="form-section repo-form__https">
+				<div class="form-section__title">HTTPS credentials</div>
+				<div class="form-grid">
+					<label class="field">
+						<span class="field__label">Username (optional)</span>
+						<input class="input" name="username" value={ p.Form.Username } autocomplete="off"/>
+					</label>
+					<label class="field">
+						<span class="field__label">Password or token (optional)</span>
+						<input class="input" name="password" type="password" autocomplete="new-password"/>
+					</label>
+				</div>
+			</div>
+			<div class="form-section repo-form__ssh">
+				<div class="form-section__title">SSH credentials</div>
+				<label class="field">
+					<span class="field__label">SSH private key</span>
+					<textarea class="textarea" name="sshPrivateKey" rows="6" spellcheck="false" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+					<span class="field__help">Leave empty to use the server's default key.</span>
+				</label>
+			</div>
+			<div class="form-section">
+				<div class="checks">
+					<label class="check check--upper" title="Skip TLS certificate and SSH host key verification">
+						<input type="checkbox" name="insecure" value="true" checked?={ p.Form.Insecure }/>
+						Skip server verification
+					</label>
+					<label class="check check--upper" title="Save the repository even when the connection test fails">
+						<input type="checkbox" name="force" value="true" checked?={ p.Form.Force }/>
+						Save even if the connection fails
+					</label>
+				</div>
+			</div>
+			<div class="flex">
+				<button class="btn" type="submit">
+					@Icon("link")
+					Connect
+				</button>
+				@closeButton(p.CloseHref, "Cancel")
+			</div>
+		</form>
+	}
+}
+
+// ─── projects ───────────────────────────────────────────────────────────
+
+templ ProjectsView(p ProjectsPage) {
+	@Shell(p.Page, projectsToolbar(p), "") {
+		<main class="content">
+			@pageError(p.Error)
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Description</th>
+						<th>Sources</th>
+						<th>Destinations</th>
+						<th>Applications</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, pr := range p.Projects {
+						<tr class="clickable" hx-get={ "/ui/settings/projects/" + url.PathEscape(pr.Metadata.Name) } hx-target="body" hx-push-url="true">
+							<td class="bold">
+								@Icon("folder", "icon--sm")
+								<a href={ SafeURL("/ui/settings/projects/" + url.PathEscape(pr.Metadata.Name)) }>{ pr.Metadata.Name }</a>
+							</td>
+							<td class="muted">{ pr.Spec.Description }</td>
+							<td>
+								<div class="tags">
+									for _, s := range pr.Spec.SourceRepos {
+										<span class="tag mono">{ s }</span>
+									}
+								</div>
+							</td>
+							<td>
+								<div class="tags">
+									for _, d := range pr.Spec.Destinations {
+										<span class="tag mono">{ destinationText(d) }</span>
+									}
+								</div>
+							</td>
+							<td>{ Itoa(p.AppCounts[pr.Metadata.Name]) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</main>
+	}
+}
+
+func destinationText(d v1.ApplicationDestination) string {
+	s := or(d.Name, "*")
+	if d.Region != "" {
+		s += "/" + d.Region
+	}
+	return s + "/" + or(d.Namespace, "*")
+}
+
+templ projectsToolbar(p ProjectsPage) {
+	<div class="toolbar">
+		if p.CanCreate {
+			<a class="btn" href="/ui/settings/projects?panel=new" hx-get="/ui/settings/projects?panel=new" hx-target="#panel" hx-push-url="true">
+				@Icon("plus")
+				New project
+			</a>
+		}
+	</div>
+}
+
+templ ProjectView(p ProjectPage) {
+	@Shell(p.Page, projectToolbar(p), "") {
+		<main class="content">
+			@pageError(p.Error)
+			<div class="white-box">
+				<div class="white-box__title">Summary</div>
+				<div class="kv">
+					<div class="kv__key">Name</div>
+					<div>{ p.Project.Metadata.Name }</div>
+					<div class="kv__key">Description</div>
+					<div>{ p.Project.Spec.Description }</div>
+					<div class="kv__key">Source repositories</div>
+					<div class="tags">
+						for _, s := range p.Project.Spec.SourceRepos {
+							<span class="tag mono">{ s }</span>
+						}
+					</div>
+					<div class="kv__key">Destinations</div>
+					<div class="tags">
+						for _, d := range p.Project.Spec.Destinations {
+							<span class="tag mono">{ destinationText(d) }</span>
+						}
+					</div>
+				</div>
+			</div>
+			<div class="white-box">
+				<div class="white-box__title">Applications</div>
+				if len(p.Apps) == 0 {
+					<div class="muted">No applications use this project.</div>
+				} else {
+					<div class="flex flex-wrap">
+						for _, a := range p.Apps {
+							<a class="alloc-chip" href={ SafeURL(AppHref(a.Metadata.Name)) }>
+								@StatusIcon(HealthOf(a), "icon--sm")
+								@StatusIcon(SyncOf(a), "icon--sm")
+								{ a.Metadata.Name }
+							</a>
+						}
+					</div>
+				}
+			</div>
+		</main>
+	}
+}
+
+templ projectToolbar(p ProjectPage) {
+	<div class="toolbar">
+		if p.CanUpdate {
+			{{ href := "/ui/settings/projects/" + url.PathEscape(p.Project.Metadata.Name) + "?panel=edit" }}
+			<a class="btn btn--outline" href={ SafeURL(href) } hx-get={ href } hx-target="#panel" hx-push-url="true">
+				@Icon("edit")
+				Edit
+			</a>
+		}
+		if p.CanDelete && p.Project.Metadata.Name != v1.DefaultProject {
+			<button class="btn btn--outline" type="button" hx-post={ "/ui/settings/projects/" + url.PathEscape(p.Project.Metadata.Name) + "/delete" } hx-confirm={ "Delete the project " + p.Project.Metadata.Name + "?" }>
+				@Icon("trash")
+				Delete
+			</button>
+		}
+	</div>
+}
+
+templ ProjectPanelView(p ProjectPanel) {
+	@PanelFrame(projectPanelTitle(p), "folder", p.CloseHref, true, nil) {
+		@panelError(p.Error)
+		<form class="form" hx-post={ projectPanelAction(p) } hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+			<div class="form-section">
+				<div class="form-grid">
+					<label class="field">
+						<span class="field__label">Project name</span>
+						<input class="input" name="name" value={ p.Form.Name } required readonly?={ !p.New } pattern="[a-z0-9]([-a-z0-9.]*[a-z0-9])?" autocomplete="off"/>
+					</label>
+					<label class="field field--wide">
+						<span class="field__label">Description</span>
+						<input class="input" name="description" value={ p.Form.Description } autocomplete="off"/>
+					</label>
+					<label class="field field--wide">
+						<span class="field__label">Source repositories</span>
+						<textarea class="textarea" name="sourceRepos" rows="3" placeholder="https://git.example.com/org/*">{ p.Form.SourceRepos }</textarea>
+						<span class="field__help">One URL glob per line (* and ?). Empty allows none; * allows all.</span>
+					</label>
+					<label class="field field--wide">
+						<span class="field__label">Destinations</span>
+						<textarea class="textarea" name="destinations" rows="3" placeholder="in-cluster/default">{ p.Form.Destinations }</textarea>
+						<span class="field__help">One cluster/namespace or cluster/region/namespace per line; globs allowed.</span>
+					</label>
+				</div>
+			</div>
+			<div class="flex">
+				<button class="btn" type="submit">
+					@Icon("check")
+					Save
+				</button>
+				@closeButton(p.CloseHref, "Cancel")
+			</div>
+		</form>
+	}
+}
+
+func projectPanelTitle(p ProjectPanel) string {
+	if p.New {
+		return "Create project"
+	}
+	return "Edit project " + p.Form.Name
+}
+
+func projectPanelAction(p ProjectPanel) string {
+	if p.New {
+		return "/ui/settings/projects"
+	}
+	return "/ui/settings/projects/" + url.PathEscape(p.Form.Name)
+}
+
+// ─── clusters ───────────────────────────────────────────────────────────
+
+templ ClustersView(p ClustersPage) {
+	@Shell(p.Page, nil, "") {
+		<main class="content">
+			@pageError(p.Error)
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Server</th>
+						<th>Version</th>
+						<th>Region</th>
+						<th>Nodes</th>
+						<th>Applications</th>
+						<th>Connection status</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, c := range p.Clusters {
+						<tr class="clickable" hx-get={ "/ui/settings/clusters/" + url.PathEscape(c.Name) } hx-target="body" hx-push-url="true">
+							<td class="bold">
+								@Icon("server", "icon--sm")
+								<a href={ SafeURL("/ui/settings/clusters/" + url.PathEscape(c.Name)) }>{ c.Name }</a>
+							</td>
+							<td class="mono">{ c.Server }</td>
+							<td>{ c.Version }</td>
+							<td>{ c.Region }</td>
+							<td>{ Itoa(c.ReadyNodes) } / { Itoa(c.Nodes) } ready</td>
+							<td>{ Itoa(c.Applications) }</td>
+							<td>
+								<span class="status" title={ c.Message }>
+									@StatusIcon(c.Status, "icon--sm")
+									{ c.Status }
+								</span>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</main>
+	}
+}
+
+templ ClusterDetailView(p ClusterPage) {
+	@Shell(p.Page, nil, "") {
+		<main class="content">
+			@pageError(p.Error)
+			<div class="white-box">
+				<div class="kv">
+					<div class="kv__key">Server</div>
+					<div class="mono">{ p.Cluster.Server }</div>
+					<div class="kv__key">Version</div>
+					<div>Nomad { p.Cluster.Version }</div>
+					<div class="kv__key">Regions</div>
+					<div>{ strings.Join(p.Cluster.Regions, ", ") }</div>
+					<div class="kv__key">Namespaces</div>
+					<div class="tags">
+						for _, n := range p.Cluster.Namespaces {
+							<span class="tag">{ n }</span>
+						}
+					</div>
+					<div class="kv__key">Node pools</div>
+					<div class="tags">
+						for _, n := range p.Cluster.NodePools {
+							<span class="tag">{ n }</span>
+						}
+					</div>
+					<div class="kv__key">Status</div>
+					<div>
+						<span class="status">
+							@StatusIcon(p.Cluster.Status, "icon--sm")
+							{ p.Cluster.Status }
+						</span>
+						<span class="muted">{ p.Cluster.Message }</span>
+					</div>
+				</div>
+			</div>
+			<div class="white-box">
+				<div class="white-box__title">Client nodes</div>
+				if len(p.Nodes) == 0 {
+					<div class="muted">No client nodes.</div>
+				} else {
+					<table class="table table--plain table--compact">
+						<thead>
+							<tr>
+								<th>Name</th>
+								<th>Datacenter</th>
+								<th>Pool</th>
+								<th>Address</th>
+								<th>Version</th>
+								<th>Status</th>
+								<th>systemd driver</th>
+								<th>Drivers</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, n := range p.Nodes {
+								<tr>
+									<td class="bold">{ n.Name }</td>
+									<td>{ n.Datacenter }</td>
+									<td>{ n.NodePool }</td>
+									<td class="mono">{ n.Address }</td>
+									<td>{ n.Version }</td>
+									<td class="nowrap">
+										<span class="status">
+											@StatusIcon(nodeHealth(n), "icon--sm")
+											{ n.Status }
+										</span>
+										if !n.Eligible {
+											<span class="tag">ineligible</span>
+										}
+										if n.Drain {
+											<span class="tag">draining</span>
+										}
+									</td>
+									<td>
+										if n.HasDriver("systemd") {
+											<span class="status">
+												@StatusIcon("Healthy", "icon--sm")
+												ready
+											</span>
+										} else {
+											<span class="faint">not detected</span>
+										}
+									</td>
+									<td>
+										<div class="tags">
+											for _, d := range n.Drivers {
+												<span class="tag">{ d }</span>
+											}
+										</div>
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+		</main>
+	}
+}
+
+func nodeHealth(n NodeView) string {
+	switch n.Status {
+	case "ready":
+		return "Healthy"
+	case "initializing":
+		return "Progressing"
+	case "down", "disconnected":
+		return "Degraded"
+	}
+	return "Unknown"
+}
+
+// ─── accounts, appearance, user info ────────────────────────────────────
+
+templ AccountsView(p AccountsPage) {
+	@Shell(p.Page, nil, "") {
+		<main class="content">
+			@pageError(p.Error)
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Enabled</th>
+						<th>Capabilities</th>
+						<th>Groups</th>
+						<th>Password changed</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, a := range p.Accounts {
+						<tr>
+							<td class="bold">
+								@Icon("user", "icon--sm")
+								{ a.Name }
+							</td>
+							<td>
+								if a.Enabled {
+									<span class="status">
+										@StatusIcon("Healthy", "icon--sm")
+										enabled
+									</span>
+								} else {
+									<span class="status">
+										@StatusIcon("Suspended", "icon--sm")
+										disabled
+									</span>
+								}
+							</td>
+							<td>{ strings.Join(a.Capabilities, ", ") }</td>
+							<td>{ strings.Join(a.Groups, ", ") }</td>
+							<td class="muted">{ AgoPtr(a.PasswordMtime) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+			<p class="muted mt">Accounts and their roles are declared in the control plane configuration (the <code>auth</code> and <code>rbac</code> blocks).</p>
+		</main>
+	}
+}
+
+templ AppearanceView(p AppearancePage) {
+	@Shell(p.Page, nil, "") {
+		<main class="content">
+			<div class="white-box">
+				<div class="white-box__title">Theme</div>
+				<form class="theme-choice" hx-post="/ui/settings/appearance" hx-trigger="change" hx-target="body">
+					@themeOption("light", "Light", p.Theme)
+					@themeOption("dark", "Dark", p.Theme)
+					@themeOption("auto", "Follow the system", p.Theme)
+				</form>
+			</div>
+		</main>
+	}
+}
+
+templ themeOption(value, label, current string) {
+	<label>
+		<span class={ "theme-swatch", "theme-swatch--" + value }><span></span><span></span></span>
+		<span class="flex">
+			<input type="radio" name="theme" value={ value } checked?={ themeAttr(current) == value }/>
+			{ label }
+		</span>
+	</label>
+}
+
+templ UserInfoView(p UserInfoPage) {
+	@Shell(p.Page, userInfoToolbar(p), "") {
+		<main class="content">
+			<div class="white-box">
+				<div class="kv">
+					<div class="kv__key">Username</div>
+					<div class="bold">{ p.Username }</div>
+					<div class="kv__key">Signed in with</div>
+					<div>{ providerText(p.Provider) }</div>
+					<div class="kv__key">Groups</div>
+					<div class="tags">
+						for _, g := range p.Groups {
+							<span class="tag">{ g }</span>
+						}
+					</div>
+					<div class="kv__key">Roles</div>
+					<div class="tags">
+						for _, r := range p.Roles {
+							<span class="tag">{ r }</span>
+						}
+					</div>
+					if p.Account != nil && p.Account.PasswordMtime != nil {
+						<div class="kv__key">Password changed</div>
+						<div>{ AgoPtr(p.Account.PasswordMtime) }</div>
+					}
+				</div>
+			</div>
+		</main>
+	}
+}
+
+templ userInfoToolbar(p UserInfoPage) {
+	<div class="toolbar">
+		if p.Provider == "local" {
+			<a class="btn btn--outline" href="/ui/user-info?panel=password" hx-get="/ui/user-info?panel=password" hx-target="#panel" hx-push-url="true">
+				@Icon("key")
+				Update password
+			</a>
+		}
+		<button class="btn btn--outline" type="button" hx-post="/ui/logout">
+			@Icon("logout")
+			Log out
+		</button>
+	</div>
+}
+
+func providerText(p string) string {
+	switch p {
+	case "local":
+		return "local account"
+	case "nomad":
+		return "Nomad ACL token"
+	case "legacy":
+		return "CYSTEMD v4 token"
+	case "anonymous":
+		return "anonymous access"
+	}
+	return p
+}
+
+templ PasswordPanelView(p PasswordPanel) {
+	@PanelFrame("Update password", "key", p.CloseHref, true, nil) {
+		@panelError(p.Error)
+		if p.Done {
+			<div class="alert alert--info">
+				@StatusIcon("Synced")
+				<div>Your password was changed. Other sessions of this account were signed out.</div>
+			</div>
+		} else {
+			<form class="form" hx-post="/ui/user-info/password" hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+				<div class="form-section">
+					<div class="form-grid">
+						<label class="field field--wide">
+							<span class="field__label">Current password</span>
+							<input class="input" type="password" name="current" autocomplete="current-password" required/>
+						</label>
+						<label class="field">
+							<span class="field__label">New password</span>
+							<input class="input" type="password" name="new" autocomplete="new-password" required minlength="8"/>
+						</label>
+						<label class="field">
+							<span class="field__label">Confirm new password</span>
+							<input class="input" type="password" name="confirm" autocomplete="new-password" required minlength="8"/>
+						</label>
+					</div>
+				</div>
+				<div class="flex">
+					<button class="btn" type="submit">
+						@Icon("check")
+						Save new password
+					</button>
+					@closeButton(p.CloseHref, "Cancel")
+				</div>
+			</form>
+		}
+	}
+}
+
+func atoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}

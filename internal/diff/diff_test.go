@@ -108,3 +108,29 @@ func TestUnified(t *testing.T) {
 		t.Error("identical input produced a diff")
 	}
 }
+
+func TestLines(t *testing.T) {
+	a := "a\nb\nc\nd\ne\nf\ng\n"
+	b := "a\nb\nC\nd\ne\nf\ng\nh\n"
+	if Lines(a, a, 3) != nil {
+		t.Fatal("equal texts must give no lines")
+	}
+	if full := Lines(a, b, -1); len(full) != 9 {
+		t.Fatalf("full diff: got %d lines, want 9: %+v", len(full), full)
+	}
+	// One line of context: two hunks, b -c +C d and g +h.
+	compact := Lines(a, b, 1)
+	var ops []byte
+	for _, l := range compact {
+		ops = append(ops, l.Op)
+	}
+	if string(ops) != "@ -+ @ +" {
+		t.Fatalf("ops = %q, want %q", ops, "@ -+ @ +")
+	}
+	if compact[2].A != 3 || compact[2].B != 0 || compact[3].A != 0 || compact[3].B != 3 {
+		t.Fatalf("line numbers: %+v", compact)
+	}
+	if last := compact[len(compact)-1]; last.Text != "h" || last.B != 8 {
+		t.Fatalf("last line: %+v", last)
+	}
+}

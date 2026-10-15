@@ -51,6 +51,15 @@ git {
   fetch_timeout        = "2m"
 }
 
+# Git servers report pushes to <url>/api/webhook (GitHub, GitLab, Gitea,
+# Gogs, Bitbucket Cloud and Server): the applications that track a pushed
+# branch or tag are compared at once. Requests must be signed with this
+# secret (GitLab: sent as its token); without a secret any request is
+# accepted, as a push only makes a comparison happen sooner.
+webhook {
+  secret_file = "/etc/cystemd/secrets/webhook-secret"
+}
+
 controller {
   # Applications are compared with Git and Nomad at least this often (Git
   # webhooks and the UI's Refresh trigger it sooner).

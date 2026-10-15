@@ -41,6 +41,7 @@ type Config struct {
 	Auth         *AuthConfig        `hcl:"auth,block"`
 	RBAC         *RBACConfig        `hcl:"rbac,block"`
 	Repositories []*RepositoryBlock `hcl:"repository,block"`
+	Webhook      *WebhookConfig     `hcl:"webhook,block"`
 }
 
 // NomadConfig connects to the in-cluster Nomad (destination "in-cluster").
@@ -133,6 +134,15 @@ type RBACConfig struct {
 	DefaultRole string `hcl:"default_role,optional"`
 	Policy      string `hcl:"policy,optional"`
 	PolicyFile  string `hcl:"policy_file,optional"`
+}
+
+// WebhookConfig secures /api/webhook, where Git servers report pushes.
+type WebhookConfig struct {
+	// Secret signs (GitHub, Gitea, Gogs, Bitbucket) or authenticates
+	// (GitLab) the Git server's requests. Without one, any request is
+	// accepted (a push only makes a comparison happen sooner).
+	Secret     string `hcl:"secret,optional"`
+	SecretFile string `hcl:"secret_file,optional"`
 }
 
 // RepositoryBlock declares a repository statically.

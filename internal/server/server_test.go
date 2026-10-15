@@ -6,11 +6,16 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,12 +41,18 @@ type harness struct {
 	reader string // readonly bearer token
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T) *harness { return newHarnessWith(t, nil) }
+
+// newHarnessWith lets configure change the configuration first.
+func newHarnessWith(t *testing.T, configure func(*config.Config)) *harness {
 	t.Helper()
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
 	cfg.Nomad.Address = "http://127.0.0.1:1" // unreachable: these tests need no Nomad
+	if configure != nil {
+		configure(cfg)
+	}
 	st := store.New(store.NewMemoryKV(), "cystemd")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	am, err := auth.NewManager(ctx, auth.Options{Store: st, AdminEnabled: true, DataDir: cfg.DataDir, Logger: logger})
@@ -284,5 +295,72 @@ func TestHealthAndVersion(t *testing.T) {
 	resp.Body.Close()
 	if !strings.Contains(string(b), "cystemd_http_requests_total") {
 		t.Fatal("metrics missing")
+	}
+}
+
+func TestWebhookRefreshesTheApplicationsOfThePush(t *testing.T) {
+	h := newHarnessWith(t, func(c *config.Config) { c.Webhook = &config.WebhookConfig{Secret: "s3cret"} })
+	apps := map[string]v1.ApplicationSource{
+		"web":    {RepoURL: "https://git.example.com/ops.git", Path: "apps/web", TargetRevision: "main"},
+		"api":    {RepoURL: "git@git.example.com:ops", Path: "apps/api"}, // HEAD, another URL form
+		"canary": {RepoURL: "https://git.example.com/ops.git", Path: "apps/web", TargetRevision: "canary"},
+		"pinned": {RepoURL: "https://git.example.com/ops.git", Path: "apps/web", TargetRevision: "0123456789abcdef0123456789abcdef01234567"},
+		"other":  {RepoURL: "https://git.example.com/other.git", Path: "apps/web", TargetRevision: "main"},
+	}
+	for name, src := range apps {
+		a := demoApp(name)
+		a.Spec.Source = src
+		if code := h.do("POST", "/api/v1/applications", h.admin, a, nil); code != 200 {
+			t.Fatalf("create %s: %d", name, code)
+		}
+	}
+	body := []byte(`{"ref":"refs/heads/main","repository":{"clone_url":"https://git.example.com/ops.git","ssh_url":"git@git.example.com:ops.git","default_branch":"main"}}`)
+	post := func(headers map[string]string, body []byte) (int, map[string]any) {
+		req, _ := http.NewRequest("POST", h.srv.URL+"/api/webhook", bytes.NewReader(body))
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	if code, _ := post(map[string]string{"X-GitHub-Event": "push"}, body); code != 401 {
+		t.Fatalf("unsigned webhook: %d", code)
+	}
+	mac := hmac.New(sha256.New, []byte("s3cret"))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	code, out := post(map[string]string{"X-GitHub-Event": "push", "X-Hub-Signature-256": sig}, body)
+	if code != 200 || fmt.Sprint(out["refreshed"]) != "[api web]" {
+		t.Fatalf("webhook: %d %v", code, out)
+	}
+	for name := range apps {
+		a, err := h.store.GetApplication(context.Background(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		refreshed := a.Metadata.Annotations["cystemd.io/refresh"] == "normal"
+		if refreshed != (name == "web" || name == "api") {
+			t.Errorf("%s refreshed = %v", name, refreshed)
+		}
+	}
+	// The same push as a form (GitHub's other content type).
+	form := []byte("payload=" + url.QueryEscape(string(body)))
+	mac = hmac.New(sha256.New, []byte("s3cret"))
+	mac.Write(form)
+	if code, out := post(map[string]string{"X-GitHub-Event": "push", "X-Hub-Signature-256": "sha256=" + hex.EncodeToString(mac.Sum(nil)),
+		"Content-Type": "application/x-www-form-urlencoded"}, form); code != 200 || fmt.Sprint(out["refreshed"]) != "[api web]" {
+		t.Fatalf("form webhook: %d %v", code, out)
+	}
+	ping := []byte(`{"zen":"hi"}`)
+	mac = hmac.New(sha256.New, []byte("s3cret"))
+	mac.Write(ping)
+	if code, out := post(map[string]string{"X-GitHub-Event": "ping", "X-Hub-Signature-256": "sha256=" + hex.EncodeToString(mac.Sum(nil))}, ping); code != 200 || out["message"] == nil {
+		t.Fatalf("ping: %d %v", code, out)
 	}
 }

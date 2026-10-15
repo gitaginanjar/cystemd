@@ -95,6 +95,21 @@ func (r *RepoService) InvalidateRevision(repoURL string) {
 	}
 }
 
+// InvalidateRevisionBefore drops the cached resolutions of repoURL made
+// before t. A refresh wants Git's current state; refreshes arriving
+// together (a webhook refreshing every application of a repository)
+// still share one lookup.
+func (r *RepoService) InvalidateRevisionBefore(repoURL string, t time.Time) {
+	prefix := git.NormalizeURL(repoURL) + "@"
+	r.revMu.Lock()
+	defer r.revMu.Unlock()
+	for k, c := range r.revCache {
+		if strings.HasPrefix(k, prefix) && c.at.Before(t) {
+			delete(r.revCache, k)
+		}
+	}
+}
+
 func manifestKey(app *v1alpha1.Application, source v1alpha1.ApplicationSource, sha string) string {
 	b, _ := json.Marshal(struct {
 		Name string

@@ -197,6 +197,10 @@ func (c *Controller) processApp(ctx context.Context, name string, hard bool) {
 	}
 	if refresh := app.Metadata.Annotations[RefreshAnnotation]; refresh != "" {
 		hard = hard || refresh == "hard"
+		// A requested refresh looks at Git now, wherever it was requested.
+		if inv, ok := c.repos.(interface{ InvalidateRevisionBefore(string, time.Time) }); ok {
+			inv.InvalidateRevisionBefore(app.Spec.Source.RepoURL, time.Now().Add(-time.Second))
+		}
 	}
 
 	cmp, cmpErr := c.compare(ctx, app, hard)

@@ -122,9 +122,11 @@ func (s *Server) route(mux *http.ServeMux, pattern string, public bool, h http.H
 			}
 			r = r.WithContext(context.WithValue(r.Context(), identityKey{}, id))
 		}
-		if isMutation(r) && !jsonOrBearer(r) {
+		if isMutation(r) && !jsonOrBearer(r) && label != "/api/webhook" {
 			// Cookie-authenticated writes must be JSON: a cross-site form
 			// cannot send that content type (CSRF defence with SameSite).
+			// The webhook acts on no one's behalf: Git servers may post
+			// forms.
 			writeError(rec, http.StatusUnsupportedMediaType, "requests that change state must send Content-Type: application/json")
 			return
 		}
@@ -217,6 +219,7 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	s.route(mux, "POST /api/v1/session", true, s.handleLogin)
 	s.route(mux, "DELETE /api/v1/session", true, s.handleLogout)
 	s.route(mux, "GET /api/badge", true, s.handleBadge)
+	s.route(mux, "POST /api/webhook", true, s.handleWebhook)
 
 	s.route(mux, "GET /api/v1/session/userinfo", false, s.handleUserInfo)
 

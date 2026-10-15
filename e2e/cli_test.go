@@ -5,6 +5,8 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
@@ -71,6 +73,24 @@ func TestEndToEndCLI(t *testing.T) {
 	v2rev := s.repo.Commit(t, "web v2", map[string]string{
 		"apps/web/web.nomad.hcl":  tickJob("web", 2),
 		"apps/web/consul-kv.yaml": "- key: config/web/flags\n  value: a=2\n",
+	})
+	// The Git server reports the push: the application is compared at once.
+	payload := fmt.Sprintf(`{"ref":"refs/heads/master","repository":{"clone_url":%q,"default_branch":"master"}}`, s.repo.URL())
+	req, _ := http.NewRequest(http.MethodPost, s.url+"/api/webhook", strings.NewReader(payload))
+	req.Header.Set("X-GitHub-Event", "push")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hook struct{ Refreshed []string }
+	_ = json.NewDecoder(resp.Body).Decode(&hook)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || strings.Join(hook.Refreshed, ",") != "web" {
+		t.Fatalf("webhook: %d %+v", resp.StatusCode, hook)
+	}
+	s.waitApp("web", 30*time.Second, func(a *v1.Application) bool {
+		return a.Status.Sync.Status == v1.SyncStatusOutOfSync && a.Status.Sync.Revision == v2rev
 	})
 	mustOK(t, cli(t, "", "app", "get", "web", "-hard-refresh"), "Sync status:     OutOfSync to master ("+v2rev[:7]+")")
 	mustExit(t, cli(t, "", "app", "diff", "web"), 1, "-  - Count: 1", "+  - Count: 2", "-a=1", "+a=2", "nomad plan")

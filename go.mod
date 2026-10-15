@@ -11,6 +11,7 @@ require (
 	github.com/hashicorp/nomad/api v0.0.0-20260917172403-9dcbdc5e64ec
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/prometheus/client_golang v1.24.1
+	github.com/zclconf/go-cty v1.13.0
 	golang.org/x/crypto v0.57.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -68,7 +69,6 @@ require (
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
-	github.com/zclconf/go-cty v1.13.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.59.0 // indirect

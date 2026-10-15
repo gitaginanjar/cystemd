@@ -217,7 +217,7 @@ func TestSystemdRendererVaultAgentDelivery(t *testing.T) {
 			t.Errorf("agent config lacks %q:\n%s", want, agentCfg)
 		}
 	}
-	if !tasks[0].Identities[0].File || tasks[0].Identities[0].Name != "vault_default" {
+	if !tasks[0].Identities[0].File || tasks[0].Identities[0].Name != "vault_agent" {
 		t.Fatalf("identity = %+v", tasks[0].Identities[0])
 	}
 	main := tasks[2]

@@ -1,0 +1,11 @@
+apiVersion: cystemd.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+spec:
+  description: Platform services
+  sourceRepos:
+    - https://git.example.com/platform/*
+  destinations:
+    - name: in-cluster
+      namespace: platform

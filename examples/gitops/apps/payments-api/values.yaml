@@ -1,0 +1,21 @@
+# Helm-style values, as CYSTEMD v4 read them (continuous_deployment). The
+# systemd source turns them into a Nomad job for the systemd driver: the
+# package version to install, CPU and memory limits, and the service
+# configuration file.
+payments-api:
+  global:
+    image:
+      tag: "2.4.1"
+  services:
+    payments-api:
+      deployment:
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      config:
+        target.config.yml: |
+          server:
+            port: 8080
+          database:
+            pool: 20

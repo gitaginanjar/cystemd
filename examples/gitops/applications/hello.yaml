@@ -1,0 +1,25 @@
+apiVersion: cystemd.io/v1alpha1
+kind: Application
+metadata:
+  name: hello
+  labels:
+    team: platform
+spec:
+  project: platform
+  source:
+    repoURL: https://git.example.com/platform/deploy.git
+    targetRevision: main
+    path: apps/hello
+    nomad:
+      varFiles:
+        - vars/production.hcl
+      consulKV: consul-kv.yaml
+  destination:
+    name: in-cluster
+    namespace: platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

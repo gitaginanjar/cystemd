@@ -137,3 +137,15 @@ consul { kv_prefix = "cd" }
 		t.Fatal("client_cert without client_key accepted")
 	}
 }
+
+// The shipped example must stay valid.
+func TestDeployExampleParses(t *testing.T) {
+	c, err := Load("../../deploy/agent/control-plane.hcl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.ConsulEnabled() || !c.VaultEnabled() || c.Vault.AgentAddress != "http://127.0.0.1:8100" ||
+		len(c.Repositories) != 1 || !strings.Contains(c.RBAC.Policy, "role:deployer") {
+		t.Fatalf("example: %+v", c)
+	}
+}

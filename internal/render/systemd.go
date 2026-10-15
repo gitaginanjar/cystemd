@@ -357,7 +357,7 @@ auto_auth {
   method "jwt" {
     mount_path = %q
     config = {
-      path                     = "[[ env "NOMAD_SECRETS_DIR" ]]/nomad_vault_default.jwt"
+      path                     = "[[ env "NOMAD_SECRETS_DIR" ]]/nomad_vault_agent.jwt"
       role                     = %q
       remove_jwt_after_reading = false
     }
@@ -380,7 +380,7 @@ template_config {
 				"args":    []string{"agent", "-config=local/vault-agent.hcl"},
 			},
 			Identities: []*api.WorkloadIdentity{{
-				Name: "vault_default", Audience: []string{"vault.io"}, File: true, TTL: time.Hour,
+				Name: "vault_agent", Audience: []string{"vault.io"}, File: true, TTL: time.Hour,
 			}},
 			Templates: []*api.Template{{
 				EmbeddedTmpl: ptr(agentConfig(!sidecarTask)),

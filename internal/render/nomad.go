@@ -173,9 +173,15 @@ func mergeVariables(files [][]byte, overrides map[string]string) (string, error)
 		if len(body.Blocks) > 0 {
 			return "", fmt.Errorf("variable file: blocks are not allowed (%s)", body.Blocks[0].Type)
 		}
-		for name, attr := range body.Attributes {
+		// Attributes is a map: walk it in source order for stable output.
+		attrs := make([]*hclsyntax.Attribute, 0, len(body.Attributes))
+		for _, attr := range body.Attributes {
+			attrs = append(attrs, attr)
+		}
+		sort.Slice(attrs, func(i, j int) bool { return attrs[i].SrcRange.Start.Byte < attrs[j].SrcRange.Start.Byte })
+		for _, attr := range attrs {
 			rng := attr.Expr.Range()
-			set(name, string(content[rng.Start.Byte:rng.End.Byte]))
+			set(attr.Name, string(content[rng.Start.Byte:rng.End.Byte]))
 		}
 	}
 	names := make([]string, 0, len(overrides))

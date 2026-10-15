@@ -1,0 +1,34 @@
+# The standalone CYSTEMD control plane, for clusters running upstream Nomad
+# (the cystemd agent embeds the same control plane instead).
+[Unit]
+Description=CYSTEMD control plane (API, web UI, application controller)
+Documentation=https://github.com/gitaginanjar/cystemd
+Wants=network-online.target vault-agent.service
+After=network-online.target vault-agent.service
+
+[Service]
+User=cystemd
+Group=cystemd
+ExecStart=/usr/bin/cystemd-server -config /etc/cystemd/control-plane.hcl
+Restart=on-failure
+RestartSec=2
+StateDirectory=cystemd
+StateDirectoryMode=0700
+# It only needs the network and its state directory.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -240,3 +240,14 @@ func Eventually(t testing.TB, timeout time.Duration, cond func() (bool, string))
 		time.Sleep(300 * time.Millisecond)
 	}
 }
+
+// StartVaultAgent runs `vault agent` with config (HCL) and waits until
+// ready reports true (for example, the api_proxy listener answering).
+func StartVaultAgent(t testing.TB, config []byte, ready func() bool) *Agent {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "vault-agent.hcl")
+	if err := os.WriteFile(path, config, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return start(t, "vault", []string{"agent", "-config=" + path}, func(string) bool { return ready() }, "")
+}

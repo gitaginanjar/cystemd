@@ -1,0 +1,27 @@
+# Vault Agent on a CYSTEMD host (deploy/vault-agent/vault-agent.hcl): logs
+# in (AppRole), renews its token, serves the API proxy the control plane
+# uses on 127.0.0.1:8100 and renders secrets to files, restarting the
+# services that read them. It replaces the in-process Vault client of
+# CYSTEMD v4.
+[Unit]
+Description=Vault Agent for CYSTEMD
+Documentation=https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent
+Wants=network-online.target
+After=network-online.target
+ConditionFileNotEmpty=/etc/vault-agent/vault-agent.hcl
+
+[Service]
+ExecStart=/usr/bin/vault agent -config=/etc/vault-agent/vault-agent.hcl
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGINT
+Restart=on-failure
+RestartSec=5
+# Templates write service files (/opt/<service>/.env) and restart units,
+# as CYSTEMD v4 did: the agent runs as root. Tighten with ReadWritePaths=
+# and ProtectSystem= when the template destinations are known.
+PrivateTmp=yes
+NoNewPrivileges=yes
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

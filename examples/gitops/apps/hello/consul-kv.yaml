@@ -1,0 +1,7 @@
+# Consul keys this application owns: created, updated and (with prune)
+# deleted with it. A value is inline or read from a file in this directory.
+- key: config/hello/settings
+  file: conf/settings.env
+- key: config/hello/feature-flags
+  value: |
+    new_checkout=false

@@ -6,6 +6,7 @@ package diff
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/nomad/api"
 )
@@ -134,3 +135,20 @@ func TestLines(t *testing.T) {
 		t.Fatalf("last line: %+v", last)
 	}
 }
+
+func TestNormalizeJobLevelUpdate(t *testing.T) {
+	parsed := &api.Job{ID: pointerTo("web"), Update: &api.UpdateStrategy{
+		Stagger: pointerTo(30 * time.Second), MaxParallel: pointerTo(1), HealthCheck: pointerTo("checks"),
+		MinHealthyTime: pointerTo(10 * time.Second), HealthyDeadline: pointerTo(5 * time.Minute),
+	}}
+	live := &api.Job{ID: pointerTo("web"), Update: &api.UpdateStrategy{
+		Stagger: pointerTo(30 * time.Second), MaxParallel: pointerTo(1), MinHealthyTime: pointerTo(time.Duration(0)),
+	}}
+	a, _ := Normalize(parsed)
+	b, _ := Normalize(live)
+	if ToYAML(a) != ToYAML(b) {
+		t.Fatalf("job-level update defaults still differ:\n%s\n---\n%s", ToYAML(a), ToYAML(b))
+	}
+}
+
+func pointerTo[T any](v T) *T { return &v }

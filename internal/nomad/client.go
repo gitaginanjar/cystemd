@@ -70,12 +70,15 @@ type ClusterInfo struct {
 
 // Config connects to a Nomad cluster.
 type Config struct {
-	Address   string
-	Region    string
-	Namespace string
-	Token     string
-	CACert    string
-	TLSSkip   bool
+	Address    string
+	Region     string
+	Namespace  string
+	Token      string
+	CACert     string
+	ClientCert string
+	ClientKey  string
+	ServerName string
+	TLSSkip    bool
 }
 
 // Client implements API over the Nomad HTTP API.
@@ -96,8 +99,9 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Token != "" {
 		c.SecretID = cfg.Token
 	}
-	if cfg.CACert != "" || cfg.TLSSkip {
-		c.TLSConfig = &api.TLSConfig{CACert: cfg.CACert, Insecure: cfg.TLSSkip}
+	if cfg.CACert != "" || cfg.ClientCert != "" || cfg.ServerName != "" || cfg.TLSSkip {
+		c.TLSConfig = &api.TLSConfig{CACert: cfg.CACert, ClientCert: cfg.ClientCert, ClientKey: cfg.ClientKey,
+			TLSServerName: cfg.ServerName, Insecure: cfg.TLSSkip}
 	}
 	client, err := api.NewClient(c)
 	if err != nil {

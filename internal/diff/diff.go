@@ -69,6 +69,12 @@ func Normalize(job *api.Job) (map[string]any, error) {
 	for _, f := range serverFields {
 		delete(m, f)
 	}
+	// The job-level update block only seeds the task groups' (where Nomad
+	// keeps the effective strategy): parsing fills it with defaults that
+	// the server zeroes, keeping Stagger and MaxParallel. Compare those.
+	if u, ok := m["Update"].(map[string]any); ok {
+		m["Update"] = map[string]any{"Stagger": u["Stagger"], "MaxParallel": u["MaxParallel"]}
+	}
 	pruned, _ := dropEmpty(m).(map[string]any)
 	if pruned == nil {
 		pruned = map[string]any{}

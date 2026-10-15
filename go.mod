@@ -3,11 +3,12 @@ module github.com/gitaginanjar/cystemd
 go 1.26.7
 
 require (
+	github.com/a-h/templ v0.3.1020
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hashicorp/consul/api v1.34.5
 	github.com/hashicorp/hcl/v2 v2.20.2-nomad-1
-	github.com/hashicorp/nomad/api v0.0.0-20261015124312-e993465c5a6b
+	github.com/hashicorp/nomad/api v0.0.0-20260917172403-9dcbdc5e64ec
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/prometheus/client_golang v1.24.1
 	golang.org/x/crypto v0.57.0
@@ -18,7 +19,6 @@ require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
-	github.com/a-h/templ v0.3.1020 // indirect
 	github.com/agext/levenshtein v1.2.1 // indirect
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect

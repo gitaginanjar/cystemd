@@ -50,6 +50,9 @@ type NomadConfig struct {
 	Token         string `hcl:"token,optional"`
 	TokenFile     string `hcl:"token_file,optional"`
 	CACert        string `hcl:"ca_cert,optional"`
+	ClientCert    string `hcl:"client_cert,optional"`
+	ClientKey     string `hcl:"client_key,optional"`
+	TLSServerName string `hcl:"tls_server_name,optional"`
 	TLSSkipVerify bool   `hcl:"tls_skip_verify,optional"`
 }
 
@@ -61,6 +64,9 @@ type ClusterConfig struct {
 	Token         string `hcl:"token,optional"`
 	TokenFile     string `hcl:"token_file,optional"`
 	CACert        string `hcl:"ca_cert,optional"`
+	ClientCert    string `hcl:"client_cert,optional"`
+	ClientKey     string `hcl:"client_key,optional"`
+	TLSServerName string `hcl:"tls_server_name,optional"`
 	TLSSkipVerify bool   `hcl:"tls_skip_verify,optional"`
 }
 
@@ -160,19 +166,77 @@ func Load(path string) (*Config, error) {
 
 // Parse parses HCL source.
 func Parse(src []byte, filename string) (*Config, error) {
-	f, diags := hclsyntax.ParseConfig(src, filename, hcl.InitialPos)
-	if diags.HasErrors() {
-		return nil, errors.New(diags.Error())
-	}
+	return ParseEmbedded(src, filename, nil)
+}
+
+// EmbeddedDefaults are what the cystemd agent derives from its own
+// configuration for the control plane it embeds. The control-plane file
+// overrides every one of them.
+type EmbeddedDefaults struct {
+	// DataDir is a directory under the agent's data_dir.
+	DataDir string
+	// Nomad is how to reach the agent's own HTTP API.
+	NomadAddress    string
+	NomadRegion     string
+	NomadCACert     string
+	NomadClientCert string
+	NomadClientKey  string
+	// ConsulAddress and ConsulToken come from the agent's consul block;
+	// they apply when the file enables Consul without setting them.
+	ConsulAddress string
+	ConsulToken   string
+}
+
+// ParseEmbedded parses HCL source (empty for none), filling what it leaves
+// unset from the agent first, then from the environment and defaults.
+func ParseEmbedded(src []byte, filename string, d *EmbeddedDefaults) (*Config, error) {
 	var c Config
-	if diags := gohcl.DecodeBody(f.Body, nil, &c); diags.HasErrors() {
-		return nil, errors.New(diags.Error())
+	if len(src) > 0 {
+		f, diags := hclsyntax.ParseConfig(src, filename, hcl.InitialPos)
+		if diags.HasErrors() {
+			return nil, errors.New(diags.Error())
+		}
+		if diags := gohcl.DecodeBody(f.Body, nil, &c); diags.HasErrors() {
+			return nil, errors.New(diags.Error())
+		}
+	}
+	if d != nil {
+		c.applyEmbedded(d)
 	}
 	c.applyDefaults()
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	return &c, nil
+}
+
+func (c *Config) applyEmbedded(d *EmbeddedDefaults) {
+	if c.DataDir == "" {
+		c.DataDir = d.DataDir
+	}
+	if c.Nomad == nil {
+		c.Nomad = &NomadConfig{}
+	}
+	if c.Nomad.Address == "" {
+		c.Nomad.Address = d.NomadAddress
+		if c.Nomad.CACert == "" {
+			c.Nomad.CACert = d.NomadCACert
+		}
+		if c.Nomad.ClientCert == "" && c.Nomad.ClientKey == "" {
+			c.Nomad.ClientCert, c.Nomad.ClientKey = d.NomadClientCert, d.NomadClientKey
+		}
+	}
+	if c.Nomad.Region == "" {
+		c.Nomad.Region = d.NomadRegion
+	}
+	if c.Consul != nil && (c.Consul.Enabled == nil || *c.Consul.Enabled) {
+		if c.Consul.Address == "" {
+			c.Consul.Address = d.ConsulAddress
+		}
+		if c.Consul.Token == "" && c.Consul.TokenFile == "" {
+			c.Consul.Token = d.ConsulToken
+		}
+	}
 }
 
 func boolPtr(b bool) *bool { return &b }
@@ -291,6 +355,9 @@ func (c *Config) Validate() error {
 	}
 	if (c.TLSCertFile == "") != (c.TLSKeyFile == "") {
 		errs = append(errs, errors.New("tls_cert_file and tls_key_file go together"))
+	}
+	if (c.Nomad.ClientCert == "") != (c.Nomad.ClientKey == "") {
+		errs = append(errs, errors.New("nomad: client_cert and client_key go together"))
 	}
 	return errors.Join(errs...)
 }

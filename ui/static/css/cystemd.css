@@ -27,6 +27,7 @@
 	--primary: #0891b2;
 	--primary-hover: #0e7490;
 	--primary-soft: #e3f6fa;
+	--on-primary: #ffffff;
 	--accent: #f08000;
 	--danger: #d9534f;
 
@@ -69,6 +70,7 @@
 	--primary: #22b8d6;
 	--primary-hover: #49c9e2;
 	--primary-soft: #12313b;
+	--on-primary: #052029;
 	--bg: #10171e;
 	--surface: #1a232c;
 	--surface-alt: #1f2a34;
@@ -263,12 +265,12 @@ html.nav-collapsed .sidebar__collapse .icon { transform: rotate(180deg); }
 	display: inline-flex; align-items: center; justify-content: center; gap: 6px;
 	height: 32px; padding: 0 14px;
 	border-radius: 4px; border: 1px solid var(--primary);
-	background: var(--primary); color: #fff;
+	background: var(--primary); color: var(--on-primary);
 	font-size: 12.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
 	cursor: pointer; white-space: nowrap; user-select: none;
 	transition: background .12s, border-color .12s, color .12s;
 }
-.btn:hover { background: var(--primary-hover); border-color: var(--primary-hover); text-decoration: none; color: #fff; }
+.btn:hover { background: var(--primary-hover); border-color: var(--primary-hover); text-decoration: none; color: var(--on-primary); }
 .btn:focus-visible, .input:focus-visible, .select:focus-visible, .textarea:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .btn--outline { background: var(--surface); color: var(--primary); }
 .btn--outline:hover { background: var(--primary-soft); color: var(--primary-hover); }
@@ -292,7 +294,7 @@ html.nav-collapsed .sidebar__collapse .icon { transform: rotate(180deg); }
 .view-toggle a { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 30px; color: var(--text-muted); }
 .view-toggle a + a { border-left: 1px solid var(--border-strong); }
 .view-toggle a:hover { background: var(--surface-hover); text-decoration: none; color: var(--text); }
-.view-toggle a.active { background: var(--primary); color: #fff; }
+.view-toggle a.active { background: var(--primary); color: var(--on-primary); }
 
 /* ── forms ──────────────────────────────────────────────────────────────── */
 

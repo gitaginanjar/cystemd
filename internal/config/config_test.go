@@ -100,3 +100,40 @@ func TestDefaultsAndEnv(t *testing.T) {
 		t.Fatalf("env = %+v %+v", c.Consul, c.Vault)
 	}
 }
+
+func TestParseEmbedded(t *testing.T) {
+	t.Setenv("NOMAD_ADDR", "")
+	t.Setenv("CONSUL_HTTP_ADDR", "")
+	t.Setenv("VAULT_AGENT_ADDR", "")
+	t.Setenv("VAULT_ADDR", "")
+	d := &EmbeddedDefaults{
+		DataDir: "/var/lib/nomad/cystemd", NomadAddress: "https://127.0.0.1:4646", NomadRegion: "eu",
+		NomadCACert: "/etc/nomad/ca.pem", NomadClientCert: "/etc/nomad/cli.pem", NomadClientKey: "/etc/nomad/cli-key.pem",
+		ConsulAddress: "127.0.0.1:8501", ConsulToken: "agent-token",
+	}
+	c, err := ParseEmbedded(nil, "", d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DataDir != d.DataDir || c.Nomad.Address != d.NomadAddress || c.Nomad.Region != "eu" ||
+		c.Nomad.CACert != d.NomadCACert || c.Nomad.ClientKey != d.NomadClientKey || c.ConsulEnabled() {
+		t.Fatalf("embedded defaults: %+v nomad=%+v", c, c.Nomad)
+	}
+	// The file wins; Consul enabled without an address uses the agent's.
+	src := []byte(`
+data_dir = "/srv/cystemd"
+nomad { address = "http://nomad.service.consul:4646" }
+consul { kv_prefix = "cd" }
+`)
+	c, err = ParseEmbedded(src, "cp.hcl", d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DataDir != "/srv/cystemd" || c.Nomad.Address != "http://nomad.service.consul:4646" || c.Nomad.CACert != "" ||
+		!c.ConsulEnabled() || c.Consul.Address != "127.0.0.1:8501" || c.Consul.Token != "agent-token" || c.Consul.KVPrefix != "cd" {
+		t.Fatalf("file over embedded: %+v nomad=%+v consul=%+v", c, c.Nomad, c.Consul)
+	}
+	if _, err := ParseEmbedded([]byte(`nomad { client_cert = "/x.pem" }`), "cp.hcl", nil); err == nil {
+		t.Fatal("client_cert without client_key accepted")
+	}
+}

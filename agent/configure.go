@@ -5,9 +5,11 @@ package main
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/hashicorp/cli"
 	"github.com/hashicorp/go-hclog"
+	nomadagent "github.com/hashicorp/nomad/command/agent"
 	"github.com/hashicorp/nomad/helper/pluginutils/catalog"
 	"github.com/hashicorp/nomad/helper/pluginutils/loader"
 	"github.com/hashicorp/nomad/plugins/base"
@@ -29,6 +31,10 @@ func configure() {
 	if cystemdCommit != "unknown" {
 		version.ProductVersion += " (" + cystemdCommit + ")"
 	}
+
+	// The control plane: API under /api/, web UI as the agent's /ui/.
+	nomadagent.RegisterHTTPExtension(controlPlaneExt)
+	nomadagent.UIHandler = http.HandlerFunc(controlPlaneExt.serveUI)
 
 	// The systemd task driver is built in, like raw_exec and docker.
 	catalog.Register(loader.PluginID{Name: systemd.PluginName, PluginType: base.PluginTypeDriver},

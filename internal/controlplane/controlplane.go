@@ -72,7 +72,8 @@ func New(ctx context.Context, cfg *config.Config, o Options) (*ControlPlane, err
 		return nil, fmt.Errorf("nomad token: %w", err)
 	}
 	in, err := nomad.New(nomad.Config{Address: cfg.Nomad.Address, Region: cfg.Nomad.Region, Token: inToken,
-		CACert: cfg.Nomad.CACert, TLSSkip: cfg.Nomad.TLSSkipVerify})
+		CACert: cfg.Nomad.CACert, ClientCert: cfg.Nomad.ClientCert, ClientKey: cfg.Nomad.ClientKey,
+		ServerName: cfg.Nomad.TLSServerName, TLSSkip: cfg.Nomad.TLSSkipVerify})
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +83,8 @@ func New(ctx context.Context, cfg *config.Config, o Options) (*ControlPlane, err
 		if err != nil {
 			return nil, fmt.Errorf("cluster %s token: %w", cl.Name, err)
 		}
-		c, err := nomad.New(nomad.Config{Address: cl.Address, Region: cl.Region, Token: tok, CACert: cl.CACert, TLSSkip: cl.TLSSkipVerify})
+		c, err := nomad.New(nomad.Config{Address: cl.Address, Region: cl.Region, Token: tok, CACert: cl.CACert,
+			ClientCert: cl.ClientCert, ClientKey: cl.ClientKey, ServerName: cl.TLSServerName, TLSSkip: cl.TLSSkipVerify})
 		if err != nil {
 			return nil, fmt.Errorf("cluster %s: %w", cl.Name, err)
 		}

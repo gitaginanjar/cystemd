@@ -416,9 +416,9 @@ func TestConvertErrors(t *testing.T) {
 	}
 }
 
-// TestConvertedTemplateWithVaultAgent renders a converted v4 template with
+// TestRealVaultAgentRendersConvertedTemplate renders a converted v4 template with
 // a real Vault Agent: what v4 read, Vault Agent reads the same way.
-func TestConvertedTemplateWithVaultAgent(t *testing.T) {
+func TestRealVaultAgentRendersConvertedTemplate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test")
 	}

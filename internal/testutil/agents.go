@@ -8,6 +8,7 @@ package testutil
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -43,8 +44,10 @@ func FreePorts(t testing.TB, n int) []int {
 type Agent struct {
 	Addr string // host:port of the HTTP API
 	URL  string // http://host:port
-	cmd  *exec.Cmd
-	log  *syncBuffer
+	// Token is a management token when the agent runs with ACLs.
+	Token string
+	cmd   *exec.Cmd
+	log   *syncBuffer
 }
 
 // Log returns the agent's output (for failure diagnostics).
@@ -128,10 +131,20 @@ func httpOK(url string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// ConsulOptions configures StartConsulWith.
+type ConsulOptions struct {
+	// ACL enables ACLs with default deny; Agent.Token is the management
+	// token (also the agent's own token).
+	ACL bool
+}
+
 // StartConsul starts `consul agent -dev` on free ports.
-func StartConsul(t testing.TB) *Agent {
+func StartConsul(t testing.TB) *Agent { return StartConsulWith(t, ConsulOptions{}) }
+
+// StartConsulWith starts `consul agent -dev` on free ports with options.
+func StartConsulWith(t testing.TB, o ConsulOptions) *Agent {
 	t.Helper()
-	if addr := os.Getenv("CYSTEMD_TEST_CONSUL_ADDR"); addr != "" {
+	if addr := os.Getenv("CYSTEMD_TEST_CONSUL_ADDR"); addr != "" && !o.ACL {
 		return &Agent{Addr: addr, URL: "http://" + addr, log: &syncBuffer{}}
 	}
 	p := FreePorts(t, 3)
@@ -139,7 +152,17 @@ func StartConsul(t testing.TB) *Agent {
 	args := []string{"agent", "-dev", "-bind=127.0.0.1", "-client=127.0.0.1",
 		fmt.Sprintf("-http-port=%d", p[0]), "-grpc-port=-1", "-dns-port=-1",
 		fmt.Sprintf("-server-port=%d", p[1]), fmt.Sprintf("-serf-lan-port=%d", p[2]), "-serf-wan-port=-1"}
-	return start(t, "consul", args, func(addr string) bool {
+	token := ""
+	if o.ACL {
+		token = "cystemd-test-consul-root"
+		cfg := filepath.Join(t.TempDir(), "acl.hcl")
+		hcl := fmt.Sprintf("acl {\n  enabled = true\n  default_policy = \"deny\"\n  tokens {\n    initial_management = %q\n    agent = %q\n  }\n}\n", token, token)
+		if err := os.WriteFile(cfg, []byte(hcl), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		args = append(args, "-config-file="+cfg)
+	}
+	a := start(t, "consul", args, func(addr string) bool {
 		resp, err := http.Get("http://" + addr + "/v1/status/leader")
 		if err != nil {
 			return false
@@ -149,6 +172,8 @@ func StartConsul(t testing.TB) *Agent {
 		_, _ = b.ReadFrom(resp.Body)
 		return resp.StatusCode == 200 && len(strings.Trim(b.String(), `"`)) > 2
 	}, addr)
+	a.Token = token
+	return a
 }
 
 // NomadOptions configures StartNomad.
@@ -157,6 +182,11 @@ type NomadOptions struct {
 	ConsulAddr string
 	// Binary overrides the nomad binary (e.g. the cystemd fork).
 	Binary string
+	// ConsulToken is Nomad's Consul token.
+	ConsulToken string
+	// ACL enables ACLs and bootstraps them: Agent.Token is the management
+	// token.
+	ACL bool
 	// ExtraConfig is appended to the agent configuration (HCL).
 	ExtraConfig string
 }
@@ -165,14 +195,17 @@ type NomadOptions struct {
 // and waits until the client node is ready.
 func StartNomad(t testing.TB, o NomadOptions) *Agent {
 	t.Helper()
-	if addr := os.Getenv("CYSTEMD_TEST_NOMAD_ADDR"); addr != "" {
+	if addr := os.Getenv("CYSTEMD_TEST_NOMAD_ADDR"); addr != "" && !o.ACL && o.Binary == "" {
 		return &Agent{Addr: addr, URL: "http://" + addr, log: &syncBuffer{}}
 	}
 	p := FreePorts(t, 3)
 	dir := t.TempDir()
 	consul := `consul { enabled = false }`
 	if o.ConsulAddr != "" {
-		consul = fmt.Sprintf("consul {\n  address = %q\n}", o.ConsulAddr)
+		consul = fmt.Sprintf("consul {\n  address = %q\n  token   = %q\n}", o.ConsulAddr, o.ConsulToken)
+	}
+	if o.ACL {
+		consul += "\nacl {\n  enabled = true\n}"
 	}
 	cfg := fmt.Sprintf(`
 bind_addr = "127.0.0.1"
@@ -197,8 +230,17 @@ plugin "raw_exec" {
 		name = o.Binary
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", p[0])
-	return start(t, name, []string{"agent", "-dev", "-config=" + cfgPath}, func(addr string) bool {
-		resp, err := http.Get("http://" + addr + "/v1/nodes")
+	token := ""
+	a := start(t, name, []string{"agent", "-dev", "-config=" + cfgPath}, func(addr string) bool {
+		if o.ACL && token == "" {
+			token = bootstrapNomadACL(addr)
+			if token == "" {
+				return false
+			}
+		}
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/nodes", nil)
+		req.Header.Set("X-Nomad-Token", token)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return false
 		}
@@ -207,6 +249,23 @@ plugin "raw_exec" {
 		_, _ = b.ReadFrom(resp.Body)
 		return resp.StatusCode == 200 && strings.Contains(b.String(), `"Status":"ready"`)
 	}, addr)
+	a.Token = token
+	return a
+}
+
+// bootstrapNomadACL bootstraps a Nomad agent's ACLs and returns the
+// management token ("" until the server can).
+func bootstrapNomadACL(addr string) string {
+	resp, err := http.Post("http://"+addr+"/v1/acl/bootstrap", "application/json", nil)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	var out struct{ SecretID string }
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&out) != nil {
+		return ""
+	}
+	return out.SecretID
 }
 
 // StartVault starts `vault server -dev` with a known root token.

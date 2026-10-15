@@ -106,6 +106,19 @@
 		}
 	});
 
+	// Close the live streams when the page goes away: browsers report the
+	// aborted connections as errors otherwise. The SSE extension closes a
+	// stream when htmx cleans its element up. A page restored from the
+	// back/forward cache reloads, to get its streams (and fresh state) back.
+	window.addEventListener("pagehide", function () {
+		if (!window.htmx) return;
+		var streams = document.querySelectorAll("[sse-connect]");
+		for (var i = 0; i < streams.length; i++) htmx.trigger(streams[i], "htmx:beforeCleanupElement");
+	});
+	window.addEventListener("pageshow", function (ev) {
+		if (ev.persisted && document.querySelector("[sse-connect]")) location.reload();
+	});
+
 	// Toasts expire; remove them so the container stays small.
 	document.addEventListener("htmx:oobAfterSwap", function (ev) {
 		var el = ev.detail && ev.detail.target;

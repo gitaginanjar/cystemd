@@ -6,6 +6,8 @@
 #                     plane, web UI and systemd driver built in
 #   make driver       the systemd driver as an external Nomad plugin
 #   make test         unit tests (no agents needed)
+#   make test-e2e     end-to-end tests: real Consul, Nomad and Vault, the
+#                     agent binary and a browser (see e2e/doc.go)
 #   make generate     regenerate the templ views (ui/views/*_templ.go)
 #
 # See docs/FORK.md for how the Nomad fork is assembled.
@@ -33,7 +35,7 @@ TEMPL_VERSION := v0.3.1020
 BIN := bin
 
 .PHONY: all build server ctl agent fork driver generate check-generate vendor-htmx \
-	test test-race test-integration lint fmt clean help
+	test test-race test-integration test-e2e lint fmt clean help
 
 all: server ctl
 
@@ -80,14 +82,19 @@ test:
 test-race:
 	$(GO) test -short -race ./...
 
-## test-integration: tests against real Nomad, Consul and Vault binaries on PATH
+## test-integration: every test of the main module, including those against real Nomad, Consul and Vault binaries on PATH (each skips without them)
 test-integration:
-	$(GO) test -run 'Integration|EndToEnd|Real' -count=1 ./...
+	$(GO) test -count=1 ./...
+
+## test-e2e: end-to-end tests (consul, nomad and vault on PATH; bin/cystemd; Chromium)
+test-e2e:
+	cd e2e && $(GO) test -count=1 -timeout 30m ./...
 
 ## lint: formatting and vet
 lint:
-	@test -z "$$(gofmt -l cmd internal pkg ui agent driver)" || { gofmt -l cmd internal pkg ui agent driver; exit 1; }
+	@test -z "$$(gofmt -l cmd internal pkg ui agent driver e2e)" || { gofmt -l cmd internal pkg ui agent driver e2e; exit 1; }
 	$(GO) vet ./...
+	cd e2e && $(GO) vet ./...
 
 ## fmt: format the Go sources
 fmt:

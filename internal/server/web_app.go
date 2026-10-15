@@ -45,7 +45,36 @@ func appView(q url.Values) string {
 func (s *Server) liveTree(ctx context.Context, app *v1.Application) (*controller.ResourceTree, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	return s.Live.Tree(ctx, app)
+	rt, err := s.Live.Tree(ctx, app)
+	if err == nil {
+		s.addOrphans(ctx, app, rt)
+	}
+	return rt, err
+}
+
+// orphanSettings is how the Application's project watches for orphaned
+// jobs (nil: it does not).
+func (s *Server) orphanSettings(ctx context.Context, app *v1.Application) *v1.OrphanedResourcesMonitorSettings {
+	proj, err := s.Store.GetProject(ctx, app.Spec.Project)
+	if err != nil {
+		return nil
+	}
+	return proj.Spec.OrphanedResources
+}
+
+// addOrphans adds the orphaned jobs to a tree when the project watches
+// for them.
+func (s *Server) addOrphans(ctx context.Context, app *v1.Application, rt *controller.ResourceTree) {
+	settings := s.orphanSettings(ctx, app)
+	if settings == nil {
+		return
+	}
+	nodes, err := s.Live.OrphanedNodes(ctx, app, settings)
+	if err != nil {
+		s.logger.Debug("list orphaned jobs", "app", app.Metadata.Name, "error", err)
+		return
+	}
+	rt.OrphanedNodes = nodes
 }
 
 // appPage loads what the details page shows; the live tree (the costly
@@ -56,17 +85,23 @@ func (s *Server) appPage(w http.ResponseWriter, r *http.Request, app *v1.Applica
 	p := views.AppPage{
 		Page: s.page(w, r, name, "applications", "Application details "+view,
 			views.Crumb{Label: "Applications", Href: "/ui/applications"}, views.Crumb{Label: name}),
-		App:    app,
-		View:   view,
-		Perms:  s.appPerms(r, app),
-		Filter: strings.TrimSpace(q.Get("filter")),
+		App:          app,
+		View:         view,
+		Perms:        s.appPerms(r, app),
+		Filter:       strings.TrimSpace(q.Get("filter")),
+		ShowOrphaned: q.Get("orphaned") == "true",
 	}
 	if withTree {
 		rt, err := s.liveTree(r.Context(), app)
 		if err != nil {
 			p.TreeErr = err.Error()
 		}
-		tc := treeContext{app: app, view: view, perms: p.Perms, filter: p.Filter, live: s.Live}
+		if rt != nil && s.orphanSettings(r.Context(), app) != nil {
+			p.Orphaned = len(rt.OrphanedNodes)
+		} else {
+			p.Orphaned, p.ShowOrphaned = -1, false
+		}
+		tc := treeContext{app: app, view: view, perms: p.Perms, filter: p.Filter, live: s.Live, orphaned: p.ShowOrphaned}
 		p.Tree = buildTree(tc, rt)
 		if sel := q.Get("node"); sel != "" {
 			for i := range p.Tree.Nodes {
@@ -224,11 +259,16 @@ func (s *Server) nodePanel(r *http.Request, app *v1.Application, q url.Values, u
 	if err != nil {
 		p.Error = err.Error()
 	}
-	var live *controller.ResourceNode
+	var live, orphan *controller.ResourceNode
 	if rt != nil {
 		for i := range rt.Nodes {
 			if rt.Nodes[i].UID == uid {
 				live = &rt.Nodes[i]
+			}
+		}
+		for i := range rt.OrphanedNodes {
+			if rt.OrphanedNodes[i].UID == uid {
+				orphan = &rt.OrphanedNodes[i]
 			}
 		}
 	}
@@ -236,6 +276,9 @@ func (s *Server) nodePanel(r *http.Request, app *v1.Application, q url.Values, u
 	case live != nil:
 		p.Node = tc.viewNode(*live)
 		p.Summary = nodeSummary(*live)
+	case orphan != nil:
+		p.Node = tc.orphanNode(*orphan)
+		p.Summary = append(nodeSummary(*orphan), [2]string{"Managed", "No: no application tracks this job (orphaned)"})
 	case strings.HasPrefix(uid, "missing:"):
 		parts := strings.SplitN(strings.TrimPrefix(uid, "missing:"), "/", 3)
 		if len(parts) == 3 {
@@ -259,7 +302,10 @@ func (s *Server) nodePanel(r *http.Request, app *v1.Application, q url.Values, u
 	// A hook's job has no desired state to compare with.
 	managed := (p.Node.Kind == v1.KindJob || p.Node.Kind == v1.KindConsulKV) && !hook
 	hasLogs := (p.Node.Kind == v1.KindAllocation || p.Node.Kind == v1.KindTask) && perms.Logs
-	hasEvents := p.Node.Kind == v1.KindAllocation || p.Node.Kind == v1.KindTask || p.Node.Kind == v1.KindJob || managed
+	hasEvents := (p.Node.Kind == v1.KindAllocation || p.Node.Kind == v1.KindTask || p.Node.Kind == v1.KindJob || managed) && orphan == nil
+	if orphan != nil {
+		managed = false
+	}
 
 	tabs := []struct{ id, label string }{{"summary", "Summary"}}
 	if !strings.HasPrefix(uid, "missing:") {

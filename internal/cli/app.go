@@ -1199,13 +1199,17 @@ func (c *appResourcesCommand) Help() string {
 Options:
 
   -o=<format>   json, yaml or tree (with the live children).
+  -orphaned     List the orphaned jobs of the destination namespace instead
+                (the project must watch for them: orphanedResources).
 ` + c.connectionHelp()
 }
 
 func (c *appResourcesCommand) Run(args []string) int {
 	var out string
+	var orphaned bool
 	fs := c.flagSet("app resources", true)
 	fs.StringVar(&out, "o", "", "")
+	fs.BoolVar(&orphaned, "orphaned", false, "")
 	rest, ok := c.parse(fs, args, 1, c.opts.Name+" app resources [options] <name>")
 	if !ok {
 		return 1
@@ -1219,6 +1223,24 @@ func (c *appResourcesCommand) Run(args []string) int {
 	app, err := cl.GetApplication(ctx, rest[0], "")
 	if err != nil {
 		return c.fail(err)
+	}
+	if orphaned {
+		tree, err := cl.ResourceTree(ctx, rest[0])
+		if err != nil {
+			return c.fail(err)
+		}
+		if done, err := output(c.out, out, tree.OrphanedNodes); done {
+			if err != nil {
+				return c.fail(err)
+			}
+			return 0
+		}
+		t := newTable(c.out, "KIND", "NAMESPACE", "NAME", "TYPE", "STATUS")
+		for _, n := range tree.OrphanedNodes {
+			t.row(n.Kind, n.Namespace, n.Name, orDash(n.InfoValue("Type")), orDash(n.InfoValue("Status")))
+		}
+		t.flush()
+		return 0
 	}
 	if out == "tree" {
 		tree, err := cl.ResourceTree(ctx, rest[0])

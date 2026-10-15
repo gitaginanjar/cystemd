@@ -28,6 +28,8 @@ type API interface {
 	// ManagedJobs lists the jobs whose meta tracks app ("" = any app) in
 	// namespace ("*" = all namespaces).
 	ManagedJobs(ctx context.Context, namespace, app string) ([]*api.JobListStub, error)
+	// Jobs lists the jobs of a namespace, with their meta.
+	Jobs(ctx context.Context, namespace string) ([]*api.JobListStub, error)
 	Plan(ctx context.Context, job *api.Job) (*api.JobPlanResponse, error)
 	Register(ctx context.Context, job *api.Job, opts *api.RegisterOptions) (*api.JobRegisterResponse, error)
 	Deregister(ctx context.Context, namespace, id string, purge bool) (string, error)
@@ -153,6 +155,11 @@ func (c *Client) ManagedJobs(ctx context.Context, namespace, app string) ([]*api
 		qo.Filter = fmt.Sprintf(`Meta[%q] is not empty`, v1alpha1.AppMetaKey)
 	}
 	stubs, _, err := c.c.Jobs().ListOptions(&api.JobListOptions{Fields: &api.JobListFields{Meta: true}}, qo)
+	return stubs, err
+}
+
+func (c *Client) Jobs(ctx context.Context, namespace string) ([]*api.JobListStub, error) {
+	stubs, _, err := c.c.Jobs().ListOptions(&api.JobListOptions{Fields: &api.JobListFields{Meta: true}}, q(ctx, namespace))
 	return stubs, err
 }
 

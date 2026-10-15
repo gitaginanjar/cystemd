@@ -352,6 +352,25 @@ func U64(v *uint64) string {
 // SafeURL marks a server-built, same-origin URL as safe for href.
 func SafeURL(s string) templ.SafeURL { return templ.SafeURL(s) }
 
+// OrphanedText describes how a project watches for orphaned jobs.
+func OrphanedText(s *v1.OrphanedResourcesMonitorSettings) string {
+	switch {
+	case s == nil:
+		return "Not monitored"
+	case s.IsWarn():
+		return "Monitored, with a warning"
+	}
+	return "Monitored"
+}
+
+// OrphanedParam keeps the orphaned resources shown across links.
+func OrphanedParam(shown bool) string {
+	if shown {
+		return "true"
+	}
+	return ""
+}
+
 // OrDash shows "—" for an empty value.
 func OrDash(s string) string {
 	if s == "" {

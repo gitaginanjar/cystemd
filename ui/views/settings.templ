@@ -352,6 +352,8 @@ templ ProjectView(p ProjectPage) {
 							<span class="tag mono">{ destinationText(d) }</span>
 						}
 					</div>
+					<div class="kv__key">Orphaned resources</div>
+					<div>{ OrphanedText(p.Project.Spec.OrphanedResources) }</div>
 				</div>
 			</div>
 			<div class="white-box">

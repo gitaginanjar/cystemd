@@ -355,6 +355,29 @@ The `default` project allows everything. An Application whose repository, or
 one of whose jobs' destinations, its project does not allow shows a
 `ComparisonError` condition and is not synced.
 
+### Orphaned resources
+
+A job is orphaned when it runs in an Application's destination namespace
+but no Application tracks it (it has no `cystemd.app` meta): started by
+hand, left over from a migration, or of an Application deleted without
+cascading. As in Argo CD, a project can watch for them:
+
+```yaml
+spec:
+  orphanedResources:
+    warn: true                    # an OrphanedResourceWarning condition
+    ignore:                       # jobs that belong there anyway
+      - kind: Job
+        name: "debug-*"           # a glob
+```
+
+With the block present, the Application's tree can show them (**Show
+orphaned resources** in its resource bar; the API's resource tree lists
+them as `orphanedNodes`); with `warn: true`, the Application also has an
+`OrphanedResourceWarning` condition ("Application has 2 orphaned
+resources"). Child jobs of periodic and parameterized jobs, and stopped jobs,
+are not orphans.
+
 ### Sync windows
 
 As in Argo CD, a project's sync windows say when its Applications may sync:

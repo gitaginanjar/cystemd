@@ -585,3 +585,72 @@ func TestControllerHooks(t *testing.T) {
 		t.Fatalf("sync status after the failed sync = %s", a.Status.Sync.Status)
 	}
 }
+
+func TestControllerOrphanedResources(t *testing.T) {
+	e := setup(t)
+	yes := true
+	settings := &v1.OrphanedResourcesMonitorSettings{Warn: &yes, Ignore: []v1.OrphanedResourceKey{{Name: "ignored-*"}}}
+	if err := e.store.PutProject(e.ctx, &v1.AppProject{Metadata: v1.ObjectMeta{Name: "watched"}, Spec: v1.AppProjectSpec{
+		SourceRepos: []string{"*"}, Destinations: []v1.ApplicationDestination{{Name: "*", Namespace: "*"}},
+		OrphanedResources: settings,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	// Jobs started by hand next to the application's.
+	run := func(id string) {
+		t.Helper()
+		job, err := e.nomad.Jobs().ParseHCL(sleepJob(id, 1, ""), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := e.nomad.Jobs().Register(job, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("stray")
+	run("ignored-debug")
+	run("stopped")
+	if _, _, err := e.nomad.Jobs().Deregister("stopped", false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	e.repo.Commit(t, "web", map[string]string{"apps/web.nomad.hcl": sleepJob("web", 1, "")})
+	if _, err := e.store.CreateApplication(e.ctx, &v1.Application{
+		Metadata: v1.ObjectMeta{Name: "web"},
+		Spec: v1.ApplicationSpec{Project: "watched",
+			Source:     v1.ApplicationSource{RepoURL: e.repo.URL(), Path: "apps", TargetRevision: "master"},
+			SyncPolicy: &v1.SyncPolicy{Automated: &v1.SyncPolicyAutomated{}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hasWarning := func(a *v1.Application) bool {
+		for _, c := range a.Status.Conditions {
+			if c.Type == v1.ConditionOrphanedWarning && c.Message == "Application has 1 orphaned resources" {
+				return true
+			}
+		}
+		return false
+	}
+	a := e.waitApp("web", 90*time.Second, func(a *v1.Application) bool {
+		return a.Status.Sync.Status == v1.SyncStatusSynced && hasWarning(a)
+	})
+
+	live := &controller.Live{Clusters: e.clusters, Repos: e.repos}
+	nodes, err := live.OrphanedNodes(e.ctx, a, settings)
+	if err != nil || len(nodes) != 1 || nodes[0].Name != "stray" || nodes[0].UID != "job:default/stray" {
+		t.Fatalf("orphaned nodes = %+v, %v", nodes, err)
+	}
+	if m, err := live.OrphanManifest(e.ctx, a, settings, "default", "stray"); err != nil || !strings.Contains(m, "stray") {
+		t.Fatalf("orphan manifest: %v\n%s", err, m)
+	}
+	if _, err := live.OrphanManifest(e.ctx, a, settings, "default", "web"); err != controller.ErrNotManaged {
+		t.Fatalf("a managed job read as an orphan: %v", err)
+	}
+
+	// Once it is gone, so is the warning.
+	if _, _, err := e.nomad.Jobs().Deregister("stray", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	e.refresh("web")
+	e.waitApp("web", 60*time.Second, func(a *v1.Application) bool { return !hasWarning(a) })
+}

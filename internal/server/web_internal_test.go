@@ -158,6 +158,31 @@ func TestTreeHooks(t *testing.T) {
 	}
 }
 
+func TestTreeOrphans(t *testing.T) {
+	app, rt := testTree(0)
+	rt.OrphanedNodes = []controller.ResourceNode{{
+		ResourceRef: controller.ResourceRef{Kind: v1.KindJob, Namespace: "default", Name: "stray", UID: "job:default/stray"},
+		Info:        []controller.InfoItem{{Name: "Type", Value: "service"}, {Name: "Status", Value: "running"}},
+	}}
+	perms := views.AppPerms{Sync: true, Action: true}
+	hidden := buildTree(treeContext{app: app, view: "tree", perms: perms, live: &controller.Live{}}, rt)
+	for _, n := range hidden.Nodes {
+		if n.UID == "job:default/stray" {
+			t.Fatal("orphans shown without asking")
+		}
+	}
+	shown := buildTree(treeContext{app: app, view: "tree", perms: perms, live: &controller.Live{}, orphaned: true}, rt)
+	var stray *views.TreeNode
+	for i, n := range shown.Nodes {
+		if n.UID == "job:default/stray" {
+			stray = &shown.Nodes[i]
+		}
+	}
+	if stray == nil || !stray.Unmanaged || stray.Sync != "" || len(stray.Actions) != 0 || strings.Join(stray.Info, ",") != "orphaned,service" {
+		t.Fatalf("orphan node = %+v", stray)
+	}
+}
+
 func TestEdgePath(t *testing.T) {
 	if p := edgePath(0, 10, 100, 10); p != "M0 10H100" {
 		t.Fatalf("straight edge = %q", p)

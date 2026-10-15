@@ -167,6 +167,10 @@ type AppPage struct {
 	TreeErr    string
 	// Windows is how the project's sync windows stand for the app.
 	Windows v1.SyncWindowState
+	// Orphaned counts the orphaned jobs (-1: the project does not watch
+	// for them); ShowOrphaned puts them in the tree.
+	Orphaned     int
+	ShowOrphaned bool
 }
 
 // Href builds a URL on the details page keeping the view mode.
@@ -211,6 +215,7 @@ type TreeNode struct {
 	Root      bool
 	Orphan    bool // requires pruning
 	Hook      bool // a resource hook's job
+	Unmanaged bool // an orphaned job, which no application tracks
 	More      int  // a "+N more" placeholder
 	Depth     int
 	Href      string

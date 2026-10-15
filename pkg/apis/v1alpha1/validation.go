@@ -112,6 +112,13 @@ func (p *AppProject) Validate() error {
 			return fmt.Errorf("sourceRepos %q: %v", r, err)
 		}
 	}
+	if o := p.Spec.OrphanedResources; o != nil {
+		for i, k := range o.Ignore {
+			if k.Kind != "" && k.Kind != KindJob {
+				return fmt.Errorf("orphanedResources.ignore[%d]: kind %q: only jobs can be orphaned", i, k.Kind)
+			}
+		}
+	}
 	for i, w := range p.Spec.SyncWindows {
 		if w == nil {
 			return fmt.Errorf("syncWindows[%d] is empty", i)

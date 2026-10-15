@@ -392,6 +392,9 @@ func (n ResourceNode) InfoValue(name string) string {
 // ResourceTree is an Application's live resource tree.
 type ResourceTree struct {
 	Nodes []ResourceNode `json:"nodes"`
+	// OrphanedNodes are the orphaned jobs of the destination namespace,
+	// when the project watches for them.
+	OrphanedNodes []ResourceNode `json:"orphanedNodes,omitempty"`
 }
 
 // ResourceTree returns the live resource tree.

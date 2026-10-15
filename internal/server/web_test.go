@@ -487,6 +487,7 @@ func TestWebSyncWindows(t *testing.T) {
 				{Kind: "deny", Schedule: "* * * * *", Duration: "2m", Applications: []string{"web"}, Description: "freeze"},
 				{Kind: "allow", Schedule: "0 2 * * *", Duration: "1h", Namespaces: []string{"batch"}, ManualSync: true, TimeZone: "Asia/Jakarta"},
 			},
+			OrphanedResources: &v1.OrphanedResourcesMonitorSettings{},
 		},
 	}
 	if code := h.do("POST", "/api/v1/projects", h.admin, proj, nil); code != 200 {
@@ -504,7 +505,7 @@ func TestWebSyncWindows(t *testing.T) {
 
 	// The project page lists the windows.
 	_, body = h.web("GET", "/ui/settings/projects/frozen", h.admin, nil, false, "")
-	mustContain(t, body, "Sync windows", "<td>deny</td>", "<b>Active</b>", "Asia/Jakarta", ">Inactive<")
+	mustContain(t, body, "Sync windows", "<td>deny</td>", "<b>Active</b>", "Asia/Jakarta", ">Inactive<", "Orphaned resources", ">Monitored<")
 
 	// Editing the summary keeps the windows.
 	form := url.Values{"description": {"Freeze for the release"}, "sourceRepos": {"*"}, "destinations": {"*/*"}}
@@ -513,7 +514,7 @@ func TestWebSyncWindows(t *testing.T) {
 	}
 	var got v1.AppProject
 	h.do("GET", "/api/v1/projects/frozen", h.admin, nil, &got)
-	if got.Spec.Description != "Freeze for the release" || len(got.Spec.SyncWindows) != 2 {
+	if got.Spec.Description != "Freeze for the release" || len(got.Spec.SyncWindows) != 2 || got.Spec.OrphanedResources == nil {
 		t.Fatalf("project after the form: %+v", got.Spec)
 	}
 }

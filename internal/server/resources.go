@@ -40,6 +40,7 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.addOrphans(r.Context(), app, tree)
 	writeJSON(w, http.StatusOK, tree)
 }
 
@@ -73,7 +74,22 @@ func (s *Server) resourceManifest(r *http.Request, app *v1.Application, rq resou
 			return "", err
 		}
 	}
+	if rq.kind == v1.KindJob && !tracksJob(app, rq.namespace, rq.name) {
+		if settings := s.orphanSettings(r.Context(), app); settings != nil {
+			return s.Live.OrphanManifest(r.Context(), app, settings, rq.namespace, rq.name)
+		}
+	}
 	return s.Live.LiveManifest(r.Context(), app, rq.kind, rq.namespace, rq.name, rq.uid)
+}
+
+// tracksJob reports whether a job is one of the Application's resources.
+func tracksJob(app *v1.Application, namespace, name string) bool {
+	for _, r := range app.Status.Resources {
+		if r.Kind == v1.KindJob && r.Namespace == namespace && r.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {

@@ -49,6 +49,9 @@ type ResourceNode struct {
 // ResourceTree is the live resource tree of an Application.
 type ResourceTree struct {
 	Nodes []ResourceNode `json:"nodes"`
+	// OrphanedNodes are the jobs of its destination namespace no
+	// Application tracks, when its project watches for them.
+	OrphanedNodes []ResourceNode `json:"orphanedNodes,omitempty"`
 }
 
 // Live reads the live state of Applications for the API. It needs no
@@ -288,6 +291,82 @@ func short8(id string) string {
 		return id[:8]
 	}
 	return id
+}
+
+// orphanedJobs are the jobs of the Application's destination namespace
+// that no Application tracks: Argo CD's orphaned resources. Child jobs of
+// periodic and parameterized jobs, and stopped jobs, are not orphans.
+func orphanedJobs(ctx context.Context, cluster nomad.API, app *v1.Application, s *v1.OrphanedResourcesMonitorSettings) ([]*api.JobListStub, error) {
+	ns := app.Spec.Destination.NamespaceOrDefault()
+	stubs, err := cluster.Jobs(ctx, ns)
+	if err != nil {
+		return nil, err
+	}
+	var out []*api.JobListStub
+	for _, j := range stubs {
+		if j.Namespace == "" {
+			j.Namespace = ns
+		}
+		if j.Meta[v1.AppMetaKey] != "" || j.ParentID != "" || j.Stop || s.Ignored(v1.KindJob, j.ID) {
+			continue
+		}
+		out = append(out, j)
+	}
+	sort.Slice(out, func(i, k int) bool { return out[i].ID < out[k].ID })
+	return out, nil
+}
+
+// OrphanedNodes are the Application's orphaned jobs, as tree nodes.
+func (l *Live) OrphanedNodes(ctx context.Context, app *v1.Application, s *v1.OrphanedResourcesMonitorSettings) ([]ResourceNode, error) {
+	cluster, err := l.Clusters.Get(app.Spec.Destination.Name)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := orphanedJobs(ctx, cluster, app, s)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ResourceNode, 0, len(jobs))
+	for _, j := range jobs {
+		n := ResourceNode{
+			ResourceRef:     ResourceRef{Kind: v1.KindJob, Namespace: j.Namespace, Name: j.ID, UID: jobUID(j.Namespace, j.ID)},
+			Info:            []InfoItem{{"Type", j.Type}, {"Status", j.Status}},
+			ResourceVersion: strconv.FormatUint(j.JobModifyIndex, 10),
+		}
+		if j.SubmitTime != 0 {
+			t := time.Unix(0, j.SubmitTime).UTC()
+			n.CreatedAt = &t
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+// OrphanManifest returns the live manifest of one of the Application's
+// orphaned jobs.
+func (l *Live) OrphanManifest(ctx context.Context, app *v1.Application, s *v1.OrphanedResourcesMonitorSettings, namespace, name string) (string, error) {
+	nodes, err := l.OrphanedNodes(ctx, app, s)
+	if err != nil {
+		return "", err
+	}
+	for _, n := range nodes {
+		if n.Namespace == namespace && n.Name == name {
+			cluster, err := l.Clusters.Get(app.Spec.Destination.Name)
+			if err != nil {
+				return "", err
+			}
+			job, err := cluster.Job(ctx, namespace, name)
+			if err != nil || job == nil {
+				return "", orMissing(err)
+			}
+			m, err := diff.Normalize(job)
+			if err != nil {
+				return "", err
+			}
+			return diff.ToYAML(m), nil
+		}
+	}
+	return "", ErrNotManaged
 }
 
 // LiveManifest returns the live object of a tree node as YAML.

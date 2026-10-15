@@ -3,7 +3,7 @@
 
 package views
 
-import v1 "github.com/gitaginanjar/cystemd/pkg/apis/v1alpha1"
+import "strings"
 
 // AppView is the application details page. The status panel and the
 // resource views refresh on their own when the server reports a change.
@@ -75,7 +75,7 @@ templ resourcesBar(p AppPage) {
 				autocomplete="off"
 				value={ p.Filter }
 				data-search
-				hx-get={ AppURL(p.App.Metadata.Name, p.View) }
+				hx-get={ AppURL(p.App.Metadata.Name, p.View, "orphaned", OrphanedParam(p.ShowOrphaned)) }
 				hx-trigger="input changed delay:300ms, search"
 				hx-target="#app-resources"
 				hx-swap="outerHTML"
@@ -83,6 +83,13 @@ templ resourcesBar(p AppPage) {
 			/>
 		</label>
 		<span class="muted small">{ Plural(len(p.App.Status.Resources), "managed resource") }</span>
+		if p.Orphaned >= 0 {
+			if p.ShowOrphaned {
+				<a class="btn btn--sm btn--outline" href={ SafeURL(AppURL(p.App.Metadata.Name, p.View, "filter", p.Filter)) }>Hide orphaned resources</a>
+			} else {
+				<a class="btn btn--sm btn--outline" href={ SafeURL(AppURL(p.App.Metadata.Name, p.View, "filter", p.Filter, "orphaned", "true")) }>Show orphaned resources ({ Itoa(p.Orphaned) })</a>
+			}
+		}
 		<div class="view-toggle right" role="group" aria-label="View">
 			<a href={ SafeURL(AppURL(p.App.Metadata.Name, "tree", "filter", p.Filter)) } class={ templ.KV("active", p.View == "tree") } title="Tree">
 				@Icon("branch")
@@ -235,15 +242,19 @@ templ appBanners(p AppPage) {
 	}
 }
 
+// isWarning tells warnings (OrphanedResourceWarning,
+// SharedResourceWarning…) from errors.
+func isWarning(conditionType string) bool { return strings.HasSuffix(conditionType, "Warning") }
+
 func conditionClass(t string) string {
-	if t == v1.ConditionOrphanedWarning {
+	if isWarning(t) {
 		return "alert--warning"
 	}
 	return "alert--error"
 }
 
 func conditionIcon(t string) string {
-	if t == v1.ConditionOrphanedWarning {
+	if isWarning(t) {
 		return "Warning"
 	}
 	return "Failed"
@@ -271,7 +282,7 @@ templ treeNode(n TreeNode) {
 		<div class="tree-node tree-node--more" style={ NodeStyle(n.X, n.Y) }>+ { Itoa(n.More) } more</div>
 	} else {
 		<div
-			class={ "tree-node", "tree-node--" + n.Health, templ.KV("tree-node--root", n.Root), templ.KV("tree-node--orphan", n.Orphan), templ.KV("tree-node--selected", n.Selected) }
+			class={ "tree-node", "tree-node--" + n.Health, templ.KV("tree-node--root", n.Root), templ.KV("tree-node--orphan", n.Orphan || n.Unmanaged), templ.KV("tree-node--selected", n.Selected) }
 			style={ NodeStyle(n.X, n.Y) }
 		>
 			<a class="tree-node__link" href={ SafeURL(n.Href) } hx-get={ n.Href } hx-target="#panel" hx-push-url="true" aria-label={ n.Kind + " " + n.Name }></a>

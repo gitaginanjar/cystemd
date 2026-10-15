@@ -305,6 +305,17 @@ func (c *Controller) compare(ctx context.Context, app *v1.Application, noCache b
 		}
 	}
 
+	// Orphaned jobs in the destination namespace.
+	if settings := project.Spec.OrphanedResources; settings.IsWarn() {
+		orphans, err := orphanedJobs(ctx, cluster, app, settings)
+		switch {
+		case err != nil:
+			c.logger.Warn("list orphaned jobs", "app", app.Metadata.Name, "error", err)
+		case len(orphans) > 0:
+			cmp.conditions = append(cmp.conditions, condition(v1.ConditionOrphanedWarning, "Application has %d orphaned resources", len(orphans)))
+		}
+	}
+
 	sort.Slice(resources, func(i, j int) bool {
 		a, b := resources[i], resources[j]
 		if a.SyncWave != b.SyncWave {

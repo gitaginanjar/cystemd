@@ -629,6 +629,44 @@ type AppProjectSpec struct {
 	Destinations []ApplicationDestination `json:"destinations,omitempty" yaml:"destinations,omitempty"`
 	// SyncWindows allow or deny syncs at given times.
 	SyncWindows SyncWindows `json:"syncWindows,omitempty" yaml:"syncWindows,omitempty"`
+	// OrphanedResources watches the Applications' destination namespaces
+	// for jobs no Application tracks.
+	OrphanedResources *OrphanedResourcesMonitorSettings `json:"orphanedResources,omitempty" yaml:"orphanedResources,omitempty"`
+}
+
+// OrphanedResourcesMonitorSettings is Argo CD's: with it, an Application's
+// tree can show the orphaned jobs of its destination namespace.
+type OrphanedResourcesMonitorSettings struct {
+	// Warn gives Applications with orphaned jobs an
+	// OrphanedResourceWarning condition.
+	Warn *bool `json:"warn,omitempty" yaml:"warn,omitempty"`
+	// Ignore lists jobs that are not orphans.
+	Ignore []OrphanedResourceKey `json:"ignore,omitempty" yaml:"ignore,omitempty"`
+}
+
+// OrphanedResourceKey matches resources by kind (default Job) and name
+// (a glob; empty matches any).
+type OrphanedResourceKey struct {
+	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+}
+
+// IsWarn reports whether orphans raise a condition.
+func (s *OrphanedResourcesMonitorSettings) IsWarn() bool {
+	return s != nil && s.Warn != nil && *s.Warn
+}
+
+// Ignored reports whether a resource is never an orphan.
+func (s *OrphanedResourcesMonitorSettings) Ignored(kind, name string) bool {
+	if s == nil {
+		return false
+	}
+	for _, k := range s.Ignore {
+		if (k.Kind == "" || k.Kind == kind) && (k.Name == "" || globMatch(k.Name, name)) {
+			return true
+		}
+	}
+	return false
 }
 
 // Repository is a connected Git repository. Secret material is never

@@ -98,7 +98,8 @@ from both jobs, normalized (server-side fields dropped, defaults filled) and
 with the Application's `ignoreDifferences` applied to the desired side.
 Consul keys are compared byte for byte. Jobs that carry the Application's
 meta but are no longer rendered, and keys the Application wrote that are no
-longer rendered, *require pruning*.
+longer rendered, *require pruning*. Jobs of the destination namespace that
+no Application tracks are *orphaned*; a project can watch for them.
 
 **Health.** Each job's health comes from its type and state: its latest
 deployment, the allocations of its current version (client status,

@@ -49,6 +49,8 @@ type treeContext struct {
 	perms  views.AppPerms
 	filter string
 	live   *controller.Live
+	// orphaned shows the orphaned jobs of the tree.
+	orphaned bool
 }
 
 func nodeHref(app, view, uid, tab string) string {
@@ -89,6 +91,13 @@ func buildTree(tc treeContext, rt *controller.ResourceTree) *views.Tree {
 			}
 			nodes[n.UID] = ln
 			order = append(order, ln)
+		}
+		if tc.orphaned {
+			for _, n := range rt.OrphanedNodes {
+				ln := &layoutNode{TreeNode: tc.orphanNode(n)}
+				nodes[n.UID] = ln
+				order = append(order, ln)
+			}
 		}
 	}
 	// Managed resources without a live object (not created yet, or deleted
@@ -156,6 +165,14 @@ func buildTree(tc treeContext, rt *controller.ResourceTree) *views.Tree {
 		}
 	}
 	return layout(root)
+}
+
+// orphanNode converts an orphaned job's node: shown, never acted upon.
+func (tc treeContext) orphanNode(n controller.ResourceNode) views.TreeNode {
+	vn := tc.viewNode(n)
+	vn.Unmanaged, vn.Actions = true, nil
+	vn.Info = append([]string{"orphaned"}, vn.Info...)
+	return vn
 }
 
 // viewNode converts a live node.

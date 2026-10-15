@@ -129,3 +129,23 @@ func TestSyncWindowState(t *testing.T) {
 		t.Fatalf("no windows: %+v", st)
 	}
 }
+
+func TestOrphanedResourcesSettings(t *testing.T) {
+	var none *OrphanedResourcesMonitorSettings
+	if none.IsWarn() || none.Ignored(KindJob, "x") {
+		t.Fatal("nil settings")
+	}
+	yes := true
+	s := &OrphanedResourcesMonitorSettings{Warn: &yes, Ignore: []OrphanedResourceKey{{Name: "debug-*"}, {Kind: KindJob, Name: "tmp-*"}}}
+	if !s.IsWarn() || !s.Ignored(KindJob, "debug-shell") || s.Ignored(KindJob, "web") || !s.Ignored(KindJob, "tmp-1") {
+		t.Fatal("settings")
+	}
+	if (&OrphanedResourcesMonitorSettings{}).IsWarn() {
+		t.Fatal("warn defaults to false")
+	}
+	p := &AppProject{Metadata: ObjectMeta{Name: "p"}, Spec: AppProjectSpec{OrphanedResources: &OrphanedResourcesMonitorSettings{
+		Ignore: []OrphanedResourceKey{{Kind: "Deployment"}}}}}
+	if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "only jobs can be orphaned") {
+		t.Fatalf("validate: %v", err)
+	}
+}

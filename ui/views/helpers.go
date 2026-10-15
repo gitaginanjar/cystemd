@@ -352,6 +352,15 @@ func U64(v *uint64) string {
 // SafeURL marks a server-built, same-origin URL as safe for href.
 func SafeURL(s string) templ.SafeURL { return templ.SafeURL(s) }
 
+// SSOLoginURL starts a single sign-on with a Nomad auth method.
+func SSOLoginURL(method, returnURL string) templ.SafeURL {
+	q := url.Values{"method": {method}}
+	if returnURL != "" {
+		q.Set("return_url", returnURL)
+	}
+	return templ.SafeURL("/ui/auth/login?" + q.Encode())
+}
+
 // ExternalURL lets http(s) links through and drops anything else.
 func ExternalURL(s string) templ.SafeURL {
 	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://") {

@@ -245,7 +245,21 @@ templ LoginView(p LoginPage) {
 							<button class="btn" type="submit">Sign in</button>
 						</form>
 					}
-					if p.LocalEnabled && p.NomadTokenLogin {
+					if len(p.SSOMethods) > 0 {
+						if p.LocalEnabled {
+							<div class="login__divider">or</div>
+						}
+						<div class="login__form">
+							if len(p.SSOMethods) == 1 {
+								<a class="btn" href={ SSOLoginURL(p.SSOMethods[0], p.ReturnURL) }>Log in via SSO</a>
+							} else {
+								for _, m := range p.SSOMethods {
+									<a class="btn" href={ SSOLoginURL(m, p.ReturnURL) }>Log in via { m }</a>
+								}
+							}
+						</div>
+					}
+					if (p.LocalEnabled || len(p.SSOMethods) > 0) && p.NomadTokenLogin {
 						<div class="login__divider">or</div>
 					}
 					if p.NomadTokenLogin {

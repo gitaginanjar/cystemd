@@ -64,14 +64,17 @@ type Options struct {
 	Elector  store.Elector
 	Logger   *slog.Logger
 	Build    BuildInfo
+	// SSO is single sign-on through Nomad (nil: not configured).
+	SSO SSO
 }
 
 // Server serves the API and the web UI.
 type Server struct {
 	Options
-	logger  *slog.Logger
-	creds   *Credentials
-	commits commitCache
+	logger   *slog.Logger
+	creds    *Credentials
+	commits  commitCache
+	ssoCache ssoMethodCache
 }
 
 // New returns a Server.
@@ -218,6 +221,9 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	s.route(mux, "GET /api/v1/settings", true, s.handleSettings)
 	s.route(mux, "POST /api/v1/session", true, s.handleLogin)
 	s.route(mux, "DELETE /api/v1/session", true, s.handleLogout)
+	s.route(mux, "GET /api/v1/session/sso", true, s.handleSSOMethods)
+	s.route(mux, "POST /api/v1/session/sso/auth-url", true, s.handleSSOAuthURL)
+	s.route(mux, "POST /api/v1/session/sso/complete", true, s.handleSSOComplete)
 	s.route(mux, "GET /api/badge", true, s.handleBadge)
 	s.route(mux, "POST /api/webhook", true, s.handleWebhook)
 
@@ -408,16 +414,20 @@ type Settings struct {
 	AppLabelKey        string `json:"appLabelKey"`
 	UserLoginsDisabled bool   `json:"userLoginsDisabled"`
 	NomadTokenLogin    bool   `json:"nomadTokenLogin"`
-	AnonymousEnabled   bool   `json:"anonymousEnabled"`
-	StatusBadgeEnabled bool   `json:"statusBadgeEnabled"`
-	ConsulEnabled      bool   `json:"consulEnabled"`
-	VaultEnabled       bool   `json:"vaultEnabled"`
-	KVPrefix           string `json:"kvPrefix,omitempty"`
-	Mode               string `json:"mode"`
+	// SSOAuthMethods are the Nomad OIDC auth methods to log in with.
+	SSOAuthMethods     []string `json:"ssoAuthMethods,omitempty"`
+	AnonymousEnabled   bool     `json:"anonymousEnabled"`
+	StatusBadgeEnabled bool     `json:"statusBadgeEnabled"`
+	ConsulEnabled      bool     `json:"consulEnabled"`
+	VaultEnabled       bool     `json:"vaultEnabled"`
+	KVPrefix           string   `json:"kvPrefix,omitempty"`
+	Mode               string   `json:"mode"`
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.settings())
+	st := s.settings()
+	st.SSOAuthMethods = s.ssoMethods(r.Context())
+	writeJSON(w, http.StatusOK, st)
 }
 
 func (s *Server) settings() Settings {

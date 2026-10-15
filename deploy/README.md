@@ -118,6 +118,71 @@ GitHub, Gitea, Gogs and Bitbucket sign their requests with it; GitLab sends it
 as its token. JSON and form-encoded payloads are both accepted. The response
 lists the Applications that were refreshed.
 
+## Single sign-on
+
+Users can log in through your identity provider (Okta, Entra ID, Keycloak,
+Google…) with Nomad's OIDC auth methods: Nomad talks to the provider and
+issues an ACL token; CYSTEMD turns it into a session, the token's Nomad roles
+and policies becoming RBAC groups. The provider is configured once, in Nomad.
+
+1. Register CYSTEMD with the provider as an OIDC client whose redirect URIs
+   are `https://cystemd.example.com/ui/auth/callback` (on the agent: the
+   server agents' address) and, for `cystemdctl login -sso`,
+   `http://localhost:8085/auth/callback`.
+
+2. Create the auth method, a Nomad role, and a binding rule that gives the
+   role to a group of the provider:
+
+   ```sh
+   nomad acl auth-method create -name example-idp -type OIDC -default \
+     -max-token-ttl 1h -token-locality local \
+     -token-name-format '${value.email}' -config @auth-method.json
+   nomad acl policy apply platform-read platform-read.hcl
+   nomad acl role create -name platform -policy platform-read
+   nomad acl binding-rule create -auth-method example-idp -bind-type role \
+     -bind-name platform -selector '"platform" in list.groups'
+   ```
+
+   with `auth-method.json`:
+
+   ```json
+   {
+     "OIDCDiscoveryURL": "https://idp.example.com",
+     "OIDCClientID": "cystemd",
+     "OIDCClientSecret": "…",
+     "OIDCScopes": ["email", "groups"],
+     "BoundAudiences": ["cystemd"],
+     "AllowedRedirectURIs": [
+       "https://cystemd.example.com/ui/auth/callback",
+       "http://localhost:8085/auth/callback"
+     ],
+     "ClaimMappings": {"email": "email"},
+     "ListClaimMappings": {"groups": "groups"}
+   }
+   ```
+
+   `token_name_format` names the token after the user: it becomes the user
+   name in CYSTEMD and its audit log. Use a claim the provider controls
+   (an email or subject), not one users can edit. The token itself expires
+   after `max_token_ttl`; the CYSTEMD session lasts `session_duration`.
+
+3. Turn SSO on in the control plane and map the Nomad role to a CYSTEMD
+   role:
+
+   ```hcl
+   auth {
+     sso {}                          # every OIDC auth method, or:
+     # sso { auth_methods = ["example-idp"] }
+   }
+   rbac {
+     policy = "g, nomad:role:platform, role:admin"
+   }
+   ```
+
+The login page then offers **Log in via SSO** (one button per auth method
+when there are several), and `cystemdctl login -sso` does the same from a
+terminal. A user whose claims match no binding rule gets no session.
+
 ## Upgrading
 
 The agent is upgraded like Nomad: one server at a time (the control plane

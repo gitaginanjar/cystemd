@@ -42,6 +42,9 @@ type Options struct {
 	// errors go to the Ui. Stdin is read by login -password-stdin.
 	Stdout io.Writer
 	Stdin  io.Reader
+	// OpenBrowser opens a URL for login -sso (default: the desktop's
+	// browser, best effort; the URL is printed either way).
+	OpenBrowser func(url string) error
 }
 
 // Commands returns the command factories (keys such as "app sync").

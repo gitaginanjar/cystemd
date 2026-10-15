@@ -58,6 +58,8 @@ func (s *Server) webHandler(csp bool) http.Handler {
 	s.webRoute(mux, "GET /ui/login", true, s.webLoginPage)
 	s.webRoute(mux, "POST /ui/login", true, s.webLogin)
 	s.webRoute(mux, "POST /ui/logout", true, s.webLogout)
+	s.webRoute(mux, "GET /ui/auth/login", true, s.webSSOLogin)
+	s.webRoute(mux, "GET "+ssoCallbackPath, true, s.webSSOCallback)
 
 	s.webRoute(mux, "GET /ui/applications", false, s.webApps)
 	s.webRoute(mux, "POST /ui/applications", false, s.webCreateApp)
@@ -451,13 +453,25 @@ func (s *Server) webLoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, ret, http.StatusSeeOther)
 		return
 	}
-	s.render(w, r, http.StatusOK, views.LoginView(views.LoginPage{
+	s.render(w, r, http.StatusOK, views.LoginView(s.loginPage(r, ret, "")))
+}
+
+func (s *Server) loginPage(r *http.Request, ret, errMsg string) views.LoginPage {
+	return views.LoginPage{
 		Version:         s.Build.Version,
 		ReturnURL:       ret,
+		Error:           errMsg,
 		LocalEnabled:    true,
 		NomadTokenLogin: *s.Config.Auth.NomadTokenLogin,
+		SSOMethods:      s.ssoMethods(r.Context()),
 		Theme:           theme(r),
-	}))
+	}
+}
+
+// webLoginFailed shows the login page with an error (a failed single
+// sign-on, which comes back as a full page load).
+func (s *Server) webLoginFailed(w http.ResponseWriter, r *http.Request, code int, msg string) {
+	s.render(w, r, code, views.LoginView(s.loginPage(r, safeReturn(r.URL.Query().Get("return_url")), msg)))
 }
 
 func (s *Server) webLogin(w http.ResponseWriter, r *http.Request) {

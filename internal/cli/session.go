@@ -30,6 +30,13 @@ Options:
   -password-stdin     Read the password from standard input.
   -nomad-token=<id>   Log in with a Nomad ACL token instead (or NOMAD_TOKEN
                       with -nomad-token=env).
+  -sso                Log in through single sign-on (a Nomad OIDC auth
+                      method): opens the identity provider in a browser and
+                      receives its answer on http://localhost:<sso-port>.
+  -sso-method=<name>  Auth method (default: the server's default one).
+  -sso-port=<port>    Port of the local callback (default 8085); the auth
+                      method must allow http://localhost:<port>/auth/callback
+                      as a redirect URI.
   -name=<context>     Context name (default: the server's host).
   -ca-cert=<path>     CA certificate to verify the server with.
   -tls-skip-verify    Do not verify the server's certificate.
@@ -37,13 +44,17 @@ Options:
 }
 
 func (c *loginCommand) Run(args []string) int {
-	var username, password, nomadToken, name string
-	var passwordStdin bool
+	var username, password, nomadToken, name, ssoMethod string
+	var passwordStdin, sso bool
+	var ssoPort int
 	fs := c.flagSet("login", false)
 	fs.StringVar(&username, "username", "admin", "")
 	fs.StringVar(&password, "password", "", "")
 	fs.BoolVar(&passwordStdin, "password-stdin", false, "")
 	fs.StringVar(&nomadToken, "nomad-token", "", "")
+	fs.BoolVar(&sso, "sso", false, "")
+	fs.StringVar(&ssoMethod, "sso-method", "", "")
+	fs.IntVar(&ssoPort, "sso-port", 8085, "")
 	fs.StringVar(&name, "name", "", "")
 	fs.StringVar(&c.caCert, "ca-cert", "", "")
 	fs.BoolVar(&c.insecure, "tls-skip-verify", false, "")
@@ -77,13 +88,16 @@ func (c *loginCommand) Run(args []string) int {
 	ctx, cancel := signalContext()
 	defer cancel()
 	var token string
-	if nomadToken != "" {
+	switch {
+	case sso:
+		token, username, err = c.ssoLogin(ctx, cl, ssoMethod, ssoPort)
+	case nomadToken != "":
 		if nomadToken == "env" {
 			nomadToken = os.Getenv("NOMAD_TOKEN")
 		}
 		username = "nomad token"
 		token, err = cl.LoginNomadToken(ctx, nomadToken)
-	} else {
+	default:
 		switch {
 		case passwordStdin:
 			line, rerr := bufio.NewReader(c.opts.Stdin).ReadString('\n')

@@ -38,9 +38,10 @@ converts a v4 installation.
 - **The live tree** of every Application: job, deployment, task groups,
   services, allocations and tasks, with logs, events, live manifests and
   actions (restart, stop, signal, promote, …), updated as it changes.
-- **Projects, RBAC and accounts.** AppProjects restrict sources and
+- **Projects, RBAC, accounts and SSO.** AppProjects restrict sources and
   destinations; an Argo CD-format RBAC policy decides who may do what; users
-  log in with a local account or a Nomad ACL token.
+  log in with a local account, a Nomad ACL token, or single sign-on through
+  Nomad's OIDC auth methods.
 - **Git webhooks** from GitHub, GitLab, Gitea, Gogs and Bitbucket make the
   comparison immediate.
 

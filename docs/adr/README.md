@@ -15,3 +15,4 @@ never by editing it.
 | [0007](0007-nomad-plan-decides-sync-status.md) | Nomad's plan decides whether a job is out of sync | Accepted |
 | [0008](0008-licensing-boundary.md) | Keep CYSTEMD's own binaries free of BUSL code | Accepted |
 | [0009](0009-resource-hooks-as-batch-jobs.md) | Resource hooks as batch jobs | Accepted |
+| [0010](0010-sso-through-nomad-oidc.md) | Single sign-on through Nomad's OIDC auth methods | Accepted |

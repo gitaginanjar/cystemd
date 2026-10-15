@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	consulapi "github.com/hashicorp/consul/api"
@@ -202,12 +203,77 @@ func New(ctx context.Context, cfg *config.Config, o Options) (*ControlPlane, err
 			},
 		})
 	}
+	var sso server.SSO
+	if cfg.SSOEnabled() {
+		client, err := inClusterNomad(cfg, "")
+		if err != nil {
+			return nil, fmt.Errorf("sso: %w", err)
+		}
+		sso = &nomadSSO{client: client, only: cfg.Auth.SSO.AuthMethods}
+	}
 	cp.Server = server.New(server.Options{
 		Config: cfg, Store: cp.Store, Auth: am, RBAC: enforcer, Live: live, Repos: repos, Git: gitClient,
 		Clusters: clusters, Vault: vc, Consul: consulClient, Metrics: m, Elector: cp.Elector,
-		Logger: logger, Build: o.Build,
+		Logger: logger, Build: o.Build, SSO: sso,
 	})
 	return cp, nil
+}
+
+// nomadSSO is single sign-on through the in-cluster Nomad's OIDC auth
+// methods. Their endpoints are public: no token is sent.
+type nomadSSO struct {
+	client *nomadapi.Client
+	// only restricts and orders the auth methods offered.
+	only []string
+}
+
+func (n *nomadSSO) Methods(ctx context.Context) ([]string, error) {
+	list, _, err := n.client.ACLAuthMethods().List((&nomadapi.QueryOptions{}).WithContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	var oidc []string
+	for _, m := range list {
+		if m.Type != "OIDC" {
+			continue
+		}
+		if m.Default {
+			oidc = append([]string{m.Name}, oidc...)
+		} else {
+			oidc = append(oidc, m.Name)
+		}
+	}
+	if len(n.only) == 0 {
+		return oidc, nil
+	}
+	var out []string
+	for _, name := range n.only {
+		if slices.Contains(oidc, name) {
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+
+func (n *nomadSSO) AuthURL(ctx context.Context, method, redirectURI, nonce string) (string, error) {
+	resp, _, err := n.client.ACLAuth().GetAuthURL(&nomadapi.ACLOIDCAuthURLRequest{
+		AuthMethodName: method, RedirectURI: redirectURI, ClientNonce: nonce,
+	}, (&nomadapi.WriteOptions{}).WithContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	return resp.AuthURL, nil
+}
+
+func (n *nomadSSO) Complete(ctx context.Context, cb server.SSOCallback) (*auth.NomadToken, error) {
+	tok, _, err := n.client.ACLAuth().CompleteAuth(&nomadapi.ACLOIDCCompleteAuthRequest{
+		AuthMethodName: cb.AuthMethod, ClientNonce: cb.ClientNonce, State: cb.State, Code: cb.Code,
+		Iss: cb.Iss, RedirectURI: cb.RedirectURI,
+	}, (&nomadapi.WriteOptions{}).WithContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	return nomadTokenOf(tok), nil
 }
 
 // Run campaigns for leadership and runs the controller while leading; it
@@ -227,19 +293,26 @@ func (cp *ControlPlane) Close() {
 	}
 }
 
+// inClusterNomad is a client of the in-cluster Nomad with the given token
+// (none for the public endpoints).
+func inClusterNomad(cfg *config.Config, token string) (*nomadapi.Client, error) {
+	c := nomadapi.DefaultConfig()
+	c.Address = cfg.Nomad.Address
+	c.Region = cfg.Nomad.Region
+	c.SecretID = token
+	n := cfg.Nomad
+	if n.CACert != "" || n.ClientCert != "" || n.TLSServerName != "" || n.TLSSkipVerify {
+		c.TLSConfig = &nomadapi.TLSConfig{CACert: n.CACert, ClientCert: n.ClientCert, ClientKey: n.ClientKey,
+			TLSServerName: n.TLSServerName, Insecure: n.TLSSkipVerify}
+	}
+	return nomadapi.NewClient(c)
+}
+
 // nomadTokenResolver validates a Nomad ACL token against the in-cluster
-// Nomad and maps it to groups: nomad:management for management tokens,
-// nomad:policy:<name> and nomad:role:<name> otherwise.
+// Nomad.
 func nomadTokenResolver(cfg *config.Config) auth.NomadTokenResolver {
-	return func(ctx context.Context, token string) (*auth.Identity, error) {
-		c := nomadapi.DefaultConfig()
-		c.Address = cfg.Nomad.Address
-		c.Region = cfg.Nomad.Region
-		c.SecretID = token
-		if cfg.Nomad.CACert != "" || cfg.Nomad.TLSSkipVerify {
-			c.TLSConfig = &nomadapi.TLSConfig{CACert: cfg.Nomad.CACert, Insecure: cfg.Nomad.TLSSkipVerify}
-		}
-		client, err := nomadapi.NewClient(c)
+	return func(ctx context.Context, token string) (*auth.NomadToken, error) {
+		client, err := inClusterNomad(cfg, token)
 		if err != nil {
 			return nil, err
 		}
@@ -250,22 +323,16 @@ func nomadTokenResolver(cfg *config.Config) auth.NomadTokenResolver {
 		if tok == nil {
 			return nil, errors.New("token not found")
 		}
-		name := tok.Name
-		if name == "" {
-			name = tok.AccessorID[:8]
-		}
-		id := &auth.Identity{Username: "nomad:" + name}
-		if tok.Type == "management" {
-			id.Groups = append(id.Groups, "nomad:management")
-		}
-		for _, p := range tok.Policies {
-			id.Groups = append(id.Groups, "nomad:policy:"+p)
-		}
-		for _, r := range tok.Roles {
-			if r != nil {
-				id.Groups = append(id.Groups, "nomad:role:"+r.Name)
-			}
-		}
-		return id, nil
+		return nomadTokenOf(tok), nil
 	}
+}
+
+func nomadTokenOf(tok *nomadapi.ACLToken) *auth.NomadToken {
+	nt := &auth.NomadToken{Name: tok.Name, AccessorID: tok.AccessorID, Management: tok.Type == "management", Policies: tok.Policies}
+	for _, r := range tok.Roles {
+		if r != nil {
+			nt.Roles = append(nt.Roles, r.Name)
+		}
+	}
+	return nt
 }

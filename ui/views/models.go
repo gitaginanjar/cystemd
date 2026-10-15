@@ -615,7 +615,9 @@ type LoginPage struct {
 	Username        string
 	LocalEnabled    bool
 	NomadTokenLogin bool
-	Theme           string
+	// SSOMethods are Nomad OIDC auth methods to log in with.
+	SSOMethods []string
+	Theme      string
 }
 
 // ErrorPage is a full-page error.

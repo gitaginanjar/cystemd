@@ -24,6 +24,12 @@ A command finds its server and session in this order:
 5. `http://127.0.0.1:8080` (`cystemdctl`) or `http://127.0.0.1:4646`
    (`cystemd`).
 
+`login -sso` opens the identity provider in a browser (or prints its URL) and
+receives the answer on `http://localhost:8085/auth/callback`, which the auth
+method must allow as a redirect URI (`-sso-port` changes the port,
+`-sso-method` picks an auth method other than the default). See
+[deploy/README.md](../deploy/README.md#single-sign-on).
+
 `login` saves a context (server, session token, user, TLS settings) in
 `cystemd/config.json` under the user configuration directory
 (`~/.config/cystemd/config.json` on Linux; mode 0600; `CYSTEMD_CONFIG`
@@ -33,6 +39,7 @@ overrides the path) and makes it current:
 cystemdctl login cystemd.example.com                 # https:// unless a scheme is given
 cystemdctl login -username ops -password-stdin https://cystemd.example.com < pw
 cystemdctl login -nomad-token env cystemd.example.com   # NOMAD_TOKEN's identity
+cystemdctl login -sso cystemd.example.com               # single sign-on in a browser
 cystemdctl context                                    # list; * is current
 cystemdctl context staging                            # switch
 cystemdctl logout                                     # forget the session

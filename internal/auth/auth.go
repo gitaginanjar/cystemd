@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package auth authenticates API callers: local accounts (bcrypt), Nomad
-// ACL tokens exchanged for a session, and CYSTEMD v4 Ed25519 JWTs (so
-// existing automation keeps working). Sessions are HS256 JWTs signed with a
-// key generated once and kept in the store.
+// ACL tokens exchanged for a session, single sign-on through Nomad's OIDC
+// auth methods, and CYSTEMD v4 Ed25519 JWTs (so existing automation keeps
+// working). Sessions are HS256 JWTs signed with a key generated once and
+// kept in the store.
 package auth
 
 import (
@@ -39,6 +40,7 @@ const AdminUser = "admin"
 const (
 	ProviderLocal     = "local"
 	ProviderNomad     = "nomad"
+	ProviderSSO       = "sso"
 	ProviderLegacy    = "legacy"
 	ProviderAnonymous = "anonymous"
 )
@@ -73,8 +75,41 @@ type Claims struct {
 	Generation int64 `json:"gen,omitempty"`
 }
 
-// NomadTokenResolver turns a Nomad ACL token into an identity.
-type NomadTokenResolver func(ctx context.Context, token string) (*Identity, error)
+// NomadToken is what CYSTEMD needs of a Nomad ACL token.
+type NomadToken struct {
+	Name       string
+	AccessorID string
+	Management bool
+	Policies   []string
+	Roles      []string
+}
+
+// groups maps the token to RBAC groups: nomad:management for a management
+// token, nomad:policy:<name> and nomad:role:<name> otherwise.
+func (t *NomadToken) groups() []string {
+	var out []string
+	if t.Management {
+		out = append(out, "nomad:management")
+	}
+	for _, p := range t.Policies {
+		out = append(out, "nomad:policy:"+p)
+	}
+	for _, r := range t.Roles {
+		out = append(out, "nomad:role:"+r)
+	}
+	return out
+}
+
+// name is the token's name, or the start of its accessor ID.
+func (t *NomadToken) name() string {
+	if t.Name != "" {
+		return t.Name
+	}
+	return t.AccessorID[:min(8, len(t.AccessorID))]
+}
+
+// NomadTokenResolver looks a Nomad ACL token up by its secret.
+type NomadTokenResolver func(ctx context.Context, secret string) (*NomadToken, error)
 
 // Options configures a Manager.
 type Options struct {
@@ -255,13 +290,23 @@ func (m *Manager) LoginNomadToken(ctx context.Context, token string) (string, *I
 	if !m.throttle.allow(key) {
 		return "", nil, ErrTooManyAttempts
 	}
-	id, err := m.nomad(ctx, token)
+	nt, err := m.nomad(ctx, token)
 	if err != nil {
 		m.throttle.fail(key)
 		return "", nil, fmt.Errorf("Nomad rejected the token: %w", err)
 	}
-	id.Provider = ProviderNomad
-	id.IssuedAt = time.Now().UTC().Truncate(time.Second)
+	id := &Identity{Username: "nomad:" + nt.name(), Groups: nt.groups(), Provider: ProviderNomad,
+		IssuedAt: time.Now().UTC().Truncate(time.Second)}
+	tok, err := m.issue(id)
+	return tok, id, err
+}
+
+// LoginSSO starts a session for a user who logged in through one of
+// Nomad's OIDC auth methods, which issued nt. The user name is the token's,
+// which the auth method's token_name_format makes from the user's claims.
+func (m *Manager) LoginSSO(nt *NomadToken) (string, *Identity, error) {
+	id := &Identity{Username: nt.name(), Groups: nt.groups(), Provider: ProviderSSO,
+		IssuedAt: time.Now().UTC().Truncate(time.Second)}
 	tok, err := m.issue(id)
 	return tok, id, err
 }

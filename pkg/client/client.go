@@ -184,6 +184,48 @@ func (c *Client) LoginNomadToken(ctx context.Context, nomadToken string) (string
 	return out.Token, err
 }
 
+// SSOAuthMethods lists the Nomad OIDC auth methods the server offers for
+// single sign-on (none when it is not configured).
+func (c *Client) SSOAuthMethods(ctx context.Context) ([]string, error) {
+	var out struct {
+		AuthMethods []string `json:"authMethods"`
+	}
+	err := c.do(ctx, http.MethodGet, "/api/v1/session/sso", nil, nil, &out)
+	return out.AuthMethods, err
+}
+
+// SSOAuthURL starts a single sign-on with an auth method (empty: the
+// default one) whose callback the caller receives at redirectURI. It
+// returns the auth method and the URL to send the user to.
+func (c *Client) SSOAuthURL(ctx context.Context, method, redirectURI, clientNonce string) (string, string, error) {
+	var out struct {
+		AuthMethod string `json:"authMethod"`
+		AuthURL    string `json:"authURL"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v1/session/sso/auth-url", nil,
+		map[string]string{"authMethod": method, "redirectURI": redirectURI, "clientNonce": clientNonce}, &out)
+	return out.AuthMethod, out.AuthURL, err
+}
+
+// SSOCallback holds the parameters of the identity provider's callback.
+type SSOCallback struct {
+	AuthMethod  string `json:"authMethod"`
+	ClientNonce string `json:"clientNonce"`
+	State       string `json:"state"`
+	Code        string `json:"code"`
+	Iss         string `json:"iss,omitempty"`
+	RedirectURI string `json:"redirectURI"`
+}
+
+// LoginSSO completes a single sign-on and returns a session token.
+func (c *Client) LoginSSO(ctx context.Context, cb SSOCallback) (string, error) {
+	var out struct {
+		Token string `json:"token"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v1/session/sso/complete", nil, cb, &out)
+	return out.Token, err
+}
+
 // UserInfo describes the caller.
 type UserInfo struct {
 	LoggedIn bool     `json:"loggedIn"`

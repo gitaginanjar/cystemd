@@ -46,6 +46,12 @@ func newHarness(t *testing.T) *harness { return newHarnessWith(t, nil) }
 // newHarnessWith lets configure change the configuration first.
 func newHarnessWith(t *testing.T, configure func(*config.Config)) *harness {
 	t.Helper()
+	return newHarnessOpts(t, configure, nil)
+}
+
+// newHarnessOpts also lets options change the server's options.
+func newHarnessOpts(t *testing.T, configure func(*config.Config), options func(*server.Options)) *harness {
+	t.Helper()
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
@@ -69,11 +75,15 @@ func newHarnessWith(t *testing.T, configure func(*config.Config)) *harness {
 	clusters.Add(v1.InClusterName, nc)
 	gitClient := git.NewClient(git.Options{CacheDir: t.TempDir()})
 	repos := &controller.RepoService{Git: gitClient, Clusters: clusters}
-	s := server.New(server.Options{
+	o := server.Options{
 		Config: cfg, Store: st, Auth: am, RBAC: enforcer, Clusters: clusters, Git: gitClient, Repos: repos,
 		Live: &controller.Live{Clusters: clusters, Repos: repos}, Metrics: metrics.New(), Logger: logger,
 		Build: server.BuildInfo{Version: "test", Mode: "standalone"},
-	})
+	}
+	if options != nil {
+		options(&o)
+	}
+	s := server.New(o)
 	h := &harness{t: t, srv: httptest.NewServer(s.Handler()), store: st}
 	t.Cleanup(h.srv.Close)
 	pw, _ := os.ReadFile(filepath.Join(cfg.DataDir, "initial-admin-password"))

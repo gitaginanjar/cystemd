@@ -184,21 +184,43 @@ func TestAdminDisabled(t *testing.T) {
 func TestNomadTokenLogin(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := newManager(t, func(o *Options) {
-		o.NomadToken = func(_ context.Context, token string) (*Identity, error) {
-			if token != "good" {
-				return nil, errors.New("ACL token not found")
+		o.NomadToken = func(_ context.Context, token string) (*NomadToken, error) {
+			switch token {
+			case "good":
+				return &NomadToken{Name: "ops", AccessorID: "0123456789abcdef", Management: true}, nil
+			case "anonymous":
+				return &NomadToken{AccessorID: "fedcba9876543210", Policies: []string{"read"}, Roles: []string{"deployers"}}, nil
 			}
-			return &Identity{Username: "nomad:ops", Groups: []string{"nomad:management"}}, nil
+			return nil, errors.New("ACL token not found")
 		}
 	})
 	tok, id, err := m.LoginNomadToken(ctx, "good")
-	if err != nil || id.Provider != ProviderNomad {
+	if err != nil || id.Provider != ProviderNomad || id.Username != "nomad:ops" {
 		t.Fatalf("%v %+v", err, id)
 	}
-	if got, err := m.Verify(ctx, tok); err != nil || got.Groups[0] != "nomad:management" {
+	if got, err := m.Verify(ctx, tok); err != nil || strings.Join(got.Groups, ",") != "nomad:management" {
 		t.Fatalf("%v %+v", err, got)
+	}
+	// A token without a name goes by its accessor; its policies and roles
+	// are groups.
+	if _, id, err := m.LoginNomadToken(ctx, "anonymous"); err != nil || id.Username != "nomad:fedcba98" ||
+		strings.Join(id.Groups, ",") != "nomad:policy:read,nomad:role:deployers" {
+		t.Fatalf("%v %+v", err, id)
 	}
 	if _, _, err := m.LoginNomadToken(ctx, "bad"); err == nil {
 		t.Fatal("bad token accepted")
+	}
+}
+
+func TestSSOLogin(t *testing.T) {
+	ctx := context.Background()
+	m, _, _ := newManager(t, nil)
+	tok, id, err := m.LoginSSO(&NomadToken{Name: "alice@example.com", AccessorID: "0123456789", Roles: []string{"platform"}})
+	if err != nil || id.Provider != ProviderSSO || id.Username != "alice@example.com" {
+		t.Fatalf("%v %+v", err, id)
+	}
+	got, err := m.Verify(ctx, tok)
+	if err != nil || got.Username != "alice@example.com" || got.Provider != ProviderSSO || strings.Join(got.Groups, ",") != "nomad:role:platform" {
+		t.Fatalf("%v %+v", err, got)
 	}
 }

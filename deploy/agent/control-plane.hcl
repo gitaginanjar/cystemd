@@ -74,6 +74,11 @@ auth {
   session_duration  = "24h"
   # Accept CYSTEMD v4 Ed25519 JWTs (as role:admin) during the migration.
   # legacy_public_key_file = "/etc/cystemd/v4-jwt.pub"
+
+  # Single sign-on through Nomad's OIDC auth methods (deploy/README.md).
+  # sso {
+  #   auth_methods = ["example-idp"]
+  # }
 }
 
 # Argo CD's RBAC policy format. Built-in roles: role:admin, role:readonly.

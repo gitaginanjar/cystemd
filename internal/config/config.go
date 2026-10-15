@@ -127,6 +127,19 @@ type AuthConfig struct {
 	LegacyPublicKeyFile string `hcl:"legacy_public_key_file,optional"`
 	// AdminPasswordFile presets the admin password (bcrypt hash or plain).
 	AdminPasswordFile string `hcl:"admin_password_file,optional"`
+	// SSO enables single sign-on through the in-cluster Nomad's OIDC auth
+	// methods.
+	SSO *SSOConfig `hcl:"sso,block"`
+}
+
+// SSOConfig is single sign-on through Nomad's OIDC auth methods: the
+// identity provider is configured in Nomad, whose binding rules give the
+// ACL token it issues roles and policies; they become the user's RBAC
+// groups (nomad:role:<name>, nomad:policy:<name>).
+type SSOConfig struct {
+	// AuthMethods are offered on the login page, in this order (empty:
+	// every OIDC auth method of the cluster, the default one first).
+	AuthMethods []string `hcl:"auth_methods,optional"`
 }
 
 // RBACConfig holds the Casbin-style policy.
@@ -371,6 +384,9 @@ func (c *Config) Validate() error {
 	}
 	return errors.Join(errs...)
 }
+
+// SSOEnabled reports whether single sign-on is configured.
+func (c *Config) SSOEnabled() bool { return c.Auth != nil && c.Auth.SSO != nil }
 
 // ConsulEnabled reports whether Consul is used.
 func (c *Config) ConsulEnabled() bool {

@@ -163,12 +163,14 @@ agent, the UI replaces Nomad's under `/ui/` and Nomad's own CSP applies.
 
 ## Security
 
-- **Identity.** Users log in with a local account (bcrypt, throttled) or a
-  Nomad ACL token, which the control plane validates against Nomad and maps to
-  RBAC groups (`nomad:management`, `nomad:policy:<name>`). Sessions are
-  HS256 tokens signed with a key kept in the store; changing a password
-  revokes the account's sessions. During a v4 migration, v4's Ed25519 JWTs can
-  be accepted as `role:admin`.
+- **Identity.** Users log in with a local account (bcrypt, throttled), a
+  Nomad ACL token, which the control plane validates against Nomad, or single
+  sign-on through one of Nomad's OIDC auth methods, which issue such a token
+  ([ADR 0010](adr/0010-sso-through-nomad-oidc.md)). A token's Nomad roles and
+  policies become RBAC groups (`nomad:management`, `nomad:role:<name>`,
+  `nomad:policy:<name>`). Sessions are HS256 tokens signed with a key kept in
+  the store; changing a password revokes the account's sessions. During a v4
+  migration, v4's Ed25519 JWTs can be accepted as `role:admin`.
 - **Authorization** is an Argo CD RBAC policy: `role:admin`, `role:readonly`
   and your own roles, matched against `<project>/<application>`.
 - **The browser.** Session cookies are `HttpOnly` and `SameSite=Lax`;

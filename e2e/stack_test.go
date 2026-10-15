@@ -46,6 +46,8 @@ type stackOptions struct {
 	// workloads identities for its JWT auth, and the control plane reaches
 	// it through a Vault Agent (AppRole cystemd-server-host, API proxy).
 	vault bool
+	// config is added to the control plane's configuration.
+	config string
 }
 
 // stack is Consul and Nomad dev agents and a control plane on them, in
@@ -170,7 +172,8 @@ controller {
   reconcile_interval = "3s"
   self_heal_timeout  = "1s"
 }
-`, filepath.Join(dir, "data"), vaultBlock, s.nomad.URL, filepath.Join(dir, "nomad.token"), s.consul.Addr, filepath.Join(dir, "consul.token")))
+%s
+`, filepath.Join(dir, "data"), vaultBlock, s.nomad.URL, filepath.Join(dir, "nomad.token"), s.consul.Addr, filepath.Join(dir, "consul.token"), o.config))
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		t.Fatal(err)

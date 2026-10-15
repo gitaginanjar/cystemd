@@ -19,18 +19,20 @@ import (
 // task directory) in sync with their host destinations. It remembers what it
 // wrote, so an unchanged source costs one read per tick and never a write.
 type fileSyncer struct {
-	taskDir string
-	files   []FileConfig
-	written map[string][32]byte // destination → hash of the content last written
+	taskDir        string
+	sharedAllocDir string
+	files          []FileConfig
+	written        map[string][32]byte // destination → hash of the content last written
 }
 
-func newFileSyncer(taskDir string, files []FileConfig) *fileSyncer {
-	return &fileSyncer{taskDir: taskDir, files: files, written: map[string][32]byte{}}
+func newFileSyncer(taskDir, sharedAllocDir string, files []FileConfig) *fileSyncer {
+	return &fileSyncer{taskDir: taskDir, sharedAllocDir: sharedAllocDir, files: files, written: map[string][32]byte{}}
 }
 
 // syncResult is one file the last sync changed or could not write.
 type syncResult struct {
 	Destination string
+	OnChange    string
 	Err         error
 }
 
@@ -40,7 +42,7 @@ type syncResult struct {
 func (s *fileSyncer) sync(strict bool) (changed []syncResult, err error) {
 	var errs []error
 	for _, f := range s.files {
-		src := filepath.Join(s.taskDir, filepath.Clean(f.Source))
+		src := taskPath(s.taskDir, s.sharedAllocDir, f.Source)
 		content, rerr := os.ReadFile(src)
 		if rerr != nil {
 			if strict || !errors.Is(rerr, fs.ErrNotExist) {
@@ -64,11 +66,11 @@ func (s *fileSyncer) sync(strict bool) (changed []syncResult, err error) {
 		}
 		if werr := writeFileAtomic(f, content); werr != nil {
 			errs = append(errs, werr)
-			changed = append(changed, syncResult{Destination: f.Destination, Err: werr})
+			changed = append(changed, syncResult{Destination: f.Destination, OnChange: f.OnChange, Err: werr})
 			continue
 		}
 		s.written[f.Destination] = sum
-		changed = append(changed, syncResult{Destination: f.Destination})
+		changed = append(changed, syncResult{Destination: f.Destination, OnChange: f.OnChange})
 	}
 	return changed, errors.Join(errs...)
 }

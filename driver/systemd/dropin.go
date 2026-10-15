@@ -45,7 +45,7 @@ func renderDropIn(cfg *drivers.TaskConfig, tc *TaskConfig, taskEnvFile string) (
 	fmt.Fprintf(&b, "EnvironmentFile=%s\n", taskEnvFile)
 	for _, e := range tc.EnvironmentFiles {
 		// "-": a not-yet-rendered optional file must not block the start.
-		fmt.Fprintf(&b, "EnvironmentFile=-%s\n", filepath.Join(cfg.TaskDir().Dir, filepath.Clean(e)))
+		fmt.Fprintf(&b, "EnvironmentFile=-%s\n", taskPath(cfg.TaskDir().Dir, cfg.TaskDir().SharedAllocDir, e))
 	}
 	if tc.CPUQuota != "" {
 		q, err := cpuQuotaPerSecUSec(tc.CPUQuota)
@@ -60,9 +60,9 @@ func renderDropIn(cfg *drivers.TaskConfig, tc *TaskConfig, taskEnvFile string) (
 			return "", err
 		}
 		fmt.Fprintf(&b, "MemoryMax=%d\n", m)
-	} else if lr := linuxResources(cfg); lr != nil && lr.MemoryLimitBytes > 0 {
-		// No explicit limit: enforce the Nomad memory reservation (memory_max
-		// when the job sets it, else memory), like every Nomad driver.
+	} else if lr := linuxResources(cfg); tc.EnforceResources && lr != nil && lr.MemoryLimitBytes > 0 {
+		// Opted in: enforce the Nomad memory reservation (memory_max when the
+		// job sets it, else memory), like every Nomad driver.
 		fmt.Fprintf(&b, "MemoryMax=%d\n", lr.MemoryLimitBytes)
 	}
 	if lr := linuxResources(cfg); lr != nil && lr.CPUShares > 0 {

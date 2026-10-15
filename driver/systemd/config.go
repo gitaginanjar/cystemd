@@ -79,8 +79,10 @@ var taskConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
 		"mode":        hclspec.NewAttr("mode", "string", false),
 		"owner":       hclspec.NewAttr("owner", "string", false),
 		"group":       hclspec.NewAttr("group", "string", false),
+		"on_change":   hclspec.NewAttr("on_change", "string", false),
 	})),
 	"environment_files": hclspec.NewAttr("environment_files", "list(string)", false),
+	"enforce_resources": hclspec.NewAttr("enforce_resources", "bool", false),
 	"cpu_quota":         hclspec.NewAttr("cpu_quota", "string", false),
 	"memory_max":        hclspec.NewAttr("memory_max", "string", false),
 	"properties":        hclspec.NewAttr("properties", "list(map(string))", false),
@@ -189,14 +191,17 @@ type PackageConfig struct {
 }
 
 // FileConfig is one task `file {}` block: Source (relative to the task
-// directory, e.g. "local/app.yml" or "secrets/.env") is kept in sync with the
-// host path Destination for the task's whole lifetime.
+// directory, e.g. "local/app.yml" or "secrets/.env"; "alloc/…" is the shared
+// allocation directory) is kept in sync with the host path Destination for
+// the task's whole lifetime. OnChange is what a later change does to a
+// unit-mode task: "restart", "reload" or "none" (default).
 type FileConfig struct {
 	Source      string `codec:"source"`
 	Destination string `codec:"destination"`
 	Mode        string `codec:"mode"`
 	Owner       string `codec:"owner"`
 	Group       string `codec:"group"`
+	OnChange    string `codec:"on_change"`
 }
 
 // TaskConfig is the task `config {}` block.
@@ -209,8 +214,13 @@ type TaskConfig struct {
 	Args    []string `codec:"args"`
 	WorkDir string   `codec:"work_dir"`
 
-	Files            []FileConfig        `codec:"file"`
-	EnvironmentFiles []string            `codec:"environment_files"`
+	Files            []FileConfig `codec:"file"`
+	EnvironmentFiles []string     `codec:"environment_files"`
+	// EnforceResources applies the Nomad memory reservation as MemoryMax in
+	// unit mode when memory_max is unset. Off by default there: an existing
+	// daemon never had the limit and must not be OOM-killed by adoption.
+	// Transient tasks are always limited, like exec tasks.
+	EnforceResources bool                `codec:"enforce_resources"`
 	CPUQuota         string              `codec:"cpu_quota"`
 	MemoryMax        string              `codec:"memory_max"`
 	Properties       []map[string]string `codec:"properties"`
@@ -374,7 +384,22 @@ func (f *FileConfig) validate(cfg *Config) error {
 			return err
 		}
 	}
+	switch f.OnChange {
+	case "", "none", "restart", "reload":
+	default:
+		return fmt.Errorf("on_change %q: restart, reload or none", f.OnChange)
+	}
 	return nil
+}
+
+// taskPath resolves a task-relative path: "alloc/…" is the shared
+// allocation directory, anything else is relative to the task directory.
+func taskPath(taskDir, sharedAllocDir, rel string) string {
+	rel = filepath.Clean(rel)
+	if rest, ok := strings.CutPrefix(rel, "alloc/"); ok && sharedAllocDir != "" {
+		return filepath.Join(sharedAllocDir, rest)
+	}
+	return filepath.Join(taskDir, rel)
 }
 
 // validateTaskRelative accepts a clean relative path that stays inside the

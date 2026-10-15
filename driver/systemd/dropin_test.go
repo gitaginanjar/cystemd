@@ -20,7 +20,8 @@ func TestRenderDropIn(t *testing.T) {
 	}
 	tc := &TaskConfig{
 		Unit:             "myapp",
-		EnvironmentFiles: []string{"secrets/.env"},
+		EnforceResources: true,
+		EnvironmentFiles: []string{"secrets/.env", "alloc/data/.env"},
 		CPUQuota:         "200m",
 		Properties:       []map[string]string{{"Restart": "always", "LimitNOFILE": "65536"}},
 	}
@@ -32,6 +33,7 @@ func TestRenderDropIn(t *testing.T) {
 		"[Service]\n",
 		"EnvironmentFile=/x/secrets/.cystemd-task.env\n",
 		"EnvironmentFile=-/var/lib/nomad/alloc/a1b2c3d4-0000/myapp/secrets/.env\n",
+		"EnvironmentFile=-/var/lib/nomad/alloc/a1b2c3d4-0000/alloc/data/.env\n",
 		"CPUQuota=20%\n",
 		"MemoryMax=268435456\n", // no memory_max: the Nomad reservation is enforced
 		"CPUWeight=",
@@ -48,6 +50,13 @@ func TestRenderDropIn(t *testing.T) {
 	if !strings.Contains(got, "MemoryMax=1073741824\n") || strings.Contains(got, "MemoryMax=268435456") {
 		t.Errorf("explicit memory_max not applied:\n%s", got)
 	}
+
+	// Unit mode without enforce_resources never caps an adopted daemon.
+	tc.MemoryMax, tc.EnforceResources = "", false
+	if got, _ := renderDropIn(cfg, tc, "/env"); strings.Contains(got, "MemoryMax") {
+		t.Errorf("reservation enforced without enforce_resources:\n%s", got)
+	}
+	tc.MemoryMax = "1Gi"
 
 	// Deterministic: same input, same bytes (no spurious daemon-reload).
 	again, _ := renderDropIn(cfg, tc, "/env")

@@ -202,7 +202,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	// stale copy from the previous allocation.
 	var syncer *fileSyncer
 	if len(tc.Files) > 0 {
-		syncer = newFileSyncer(taskDir, tc.Files)
+		syncer = newFileSyncer(taskDir, cfg.TaskDir().SharedAllocDir, tc.Files)
 		if _, err := syncer.sync(true); err != nil {
 			return nil, nil, fmt.Errorf("install files: %w", err)
 		}
@@ -358,7 +358,7 @@ func transientProperties(cfg *drivers.TaskConfig, tc *TaskConfig, pc *Config, en
 	}
 	envFiles := []envFileEntry{{Path: envFile, IgnoreErrors: false}}
 	for _, e := range tc.EnvironmentFiles {
-		envFiles = append(envFiles, envFileEntry{Path: filepath.Join(cfg.TaskDir().Dir, filepath.Clean(e)), IgnoreErrors: true})
+		envFiles = append(envFiles, envFileEntry{Path: taskPath(cfg.TaskDir().Dir, cfg.TaskDir().SharedAllocDir, e), IgnoreErrors: true})
 	}
 	props := []dbus.Property{
 		dbus.PropDescription(fmt.Sprintf("Nomad task %s/%s/%s (allocation %s)", cfg.JobID, cfg.TaskGroupName, cfg.Name, cfg.AllocID)),
@@ -463,7 +463,7 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 	logger := d.logger.With("alloc_id", state.TaskConfig.AllocID, "task", state.TaskConfig.Name)
 	var syncer *fileSyncer
 	if len(state.Files) > 0 {
-		syncer = newFileSyncer(state.TaskConfig.TaskDir().Dir, state.Files)
+		syncer = newFileSyncer(state.TaskConfig.TaskDir().Dir, state.TaskConfig.TaskDir().SharedAllocDir, state.Files)
 	}
 	// Logs resume from now: the client was down, re-reading would duplicate.
 	recovered := state

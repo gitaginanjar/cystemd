@@ -62,6 +62,7 @@ type systemdManager interface {
 	// Start, Restart and Stop wait for the systemd job to finish.
 	Start(ctx context.Context, unit string) error
 	Restart(ctx context.Context, unit string) error
+	Reload(ctx context.Context, unit string) error
 	Stop(ctx context.Context, unit string) error
 	StartTransient(ctx context.Context, unit string, props []dbus.Property) error
 	Kill(ctx context.Context, unit string, signal syscall.Signal) error
@@ -234,6 +235,18 @@ func (m *dbusManager) Start(ctx context.Context, unit string) error {
 
 func (m *dbusManager) Restart(ctx context.Context, unit string) error {
 	return m.withKillWatchdog(ctx, "restart", unit)
+}
+
+func (m *dbusManager) Reload(ctx context.Context, unit string) error {
+	conn, err := m.connection()
+	if err != nil {
+		return err
+	}
+	ch := make(chan string, 1)
+	if _, err := conn.ReloadUnitContext(ctx, unit, "replace", ch); err != nil {
+		return fmt.Errorf("systemd reload %s: %w", unit, err)
+	}
+	return awaitJob(ctx, ch, "reload", unit, systemdJobTimeout)
 }
 
 func (m *dbusManager) Stop(ctx context.Context, unit string) error {

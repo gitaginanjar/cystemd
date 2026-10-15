@@ -14,7 +14,7 @@ func TestFileSyncer(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "myapp", "target.config.yml")
 	src := filepath.Join(taskDir, "local", "target.config.yml")
 	files := []FileConfig{{Source: "local/target.config.yml", Destination: dest, Mode: "0640"}}
-	s := newFileSyncer(taskDir, files)
+	s := newFileSyncer(taskDir, "", files)
 
 	// Strict sync fails on a template that has not rendered.
 	if _, err := s.sync(true); err == nil {
@@ -70,7 +70,7 @@ func TestFileSyncerKeepsIdenticalDestination(t *testing.T) {
 	os.WriteFile(dest, []byte("same"), 0o644)
 	before, _ := os.Stat(dest)
 
-	s := newFileSyncer(taskDir, []FileConfig{{Source: "local/app.yml", Destination: dest}})
+	s := newFileSyncer(taskDir, "", []FileConfig{{Source: "local/app.yml", Destination: dest}})
 	changed, err := s.sync(true)
 	if err != nil || len(changed) != 0 {
 		t.Fatalf("identical destination rewritten: changed=%v err=%v", changed, err)

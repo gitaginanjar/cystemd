@@ -156,15 +156,40 @@ func (h *taskHandle) run() {
 
 		if h.files != nil && tick%fileSyncEvery == 0 {
 			changed, err := h.files.sync(false)
+			action := ""
 			for _, c := range changed {
-				if c.Err == nil {
-					h.emit("Updated "+c.Destination, map[string]string{"file": c.Destination})
+				if c.Err != nil {
+					continue
+				}
+				h.emit("Updated "+c.Destination, map[string]string{"file": c.Destination})
+				// restart outranks reload: one restart covers both.
+				if c.OnChange == "restart" || (c.OnChange == "reload" && action == "") {
+					action = c.OnChange
 				}
 			}
 			if err != nil {
 				h.logger.Warn("file sync failed", "unit", h.unit, "error", err)
 			}
+			if action != "" && h.mode == modeUnit && st.running() {
+				h.applyFileChange(action)
+			}
 		}
+	}
+}
+
+// applyFileChange restarts or reloads the unit after a synced file changed.
+func (h *taskHandle) applyFileChange(action string) {
+	var err error
+	switch action {
+	case "restart":
+		h.emit(fmt.Sprintf("Restarting %s: a synced file changed", h.unit), map[string]string{"unit": h.unit})
+		err = h.mgr.Restart(h.ctx, h.unit)
+	case "reload":
+		h.emit(fmt.Sprintf("Reloading %s: a synced file changed", h.unit), map[string]string{"unit": h.unit})
+		err = h.mgr.Reload(h.ctx, h.unit)
+	}
+	if err != nil {
+		h.logger.Warn("unit "+action+" after file change failed", "unit", h.unit, "error", err)
 	}
 }
 

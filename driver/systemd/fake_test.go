@@ -98,6 +98,13 @@ func (f *fakeManager) Restart(_ context.Context, unit string) error {
 	return nil
 }
 
+func (f *fakeManager) Reload(_ context.Context, unit string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("reload %s", unit)
+	return nil
+}
+
 func (f *fakeManager) Stop(_ context.Context, unit string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

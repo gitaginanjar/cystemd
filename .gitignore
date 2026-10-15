@@ -1,5 +1,20 @@
+# editor / local
 .swo
 .swp
 .claude
 .env
 .json
+
+# build outputs
+/build/
+/bin/
+/dist/
+
+# UI
+/ui/node_modules/
+/ui/coverage/
+/ui/test-results/
+/ui/playwright-report/
+/test/e2e/node_modules/
+/test/e2e/test-results/
+/test/e2e/playwright-report/

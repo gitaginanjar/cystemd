@@ -1,0 +1,28 @@
+CYSTEMD fork: HTTP extension hook and replaceable web UI.
+
+Mounts every registered HTTPExtension on each public agent HTTP listener (not
+the task API socket) and serves UIFileSystem (the CYSTEMD web UI) under /ui/
+when it is set.
+---
+--- a/command/agent/http.go
++++ b/command/agent/http.go
+@@ -222,6 +222,7 @@
+ 			wsUpgrader:   wsUpgrader,
+ 		}
+ 		srv.registerHandlers(config.EnableDebug)
++		registerHTTPExtensions(srv)
+ 
+ 		// Create HTTP server with timeouts
+ 		httpServer := http.Server{
+@@ -582,7 +583,10 @@
+ 	agentConfig := s.agent.GetConfig()
+ 	uiConfigEnabled := agentConfig.UI != nil && agentConfig.UI.Enabled
+ 
+-	if uiEnabled && uiConfigEnabled {
++	if UIFileSystem != nil && uiConfigEnabled {
++		s.mux.Handle("/ui/", http.StripPrefix("/ui/", s.handleUI(agentConfig.UI.ContentSecurityPolicy, http.FileServer(spaFileSystem{UIFileSystem}))))
++		s.logger.Debug("UI is enabled (CYSTEMD)")
++	} else if uiEnabled && uiConfigEnabled {
+ 		s.mux.Handle("/ui/", http.StripPrefix("/ui/", s.handleUI(agentConfig.UI.ContentSecurityPolicy, http.FileServer(&UIAssetWrapper{FileSystem: assetFS()}))))
+ 		s.logger.Debug("UI is enabled")
+ 	} else {

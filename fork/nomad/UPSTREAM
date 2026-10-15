@@ -1,0 +1,22 @@
+# CYSTEMD fork base — HashiCorp Nomad (BUSL-1.1, see fork/nomad/README.md).
+#
+# Sourced by scripts/fork-assemble.sh. The source is fetched through the Go
+# module proxy and checked against the Go checksum database AND the h1: sums
+# pinned below, so the assembled tree is byte-for-byte the upstream release.
+#
+# Nomad 2.x tags are not valid Go module versions (no /v2 module path), so the
+# release commit is addressed by its pseudo-version.
+
+NOMAD_VERSION=2.0.7
+NOMAD_COMMIT=9dcbdc5e64ecc4ec63e42b225af729c87c87cf83
+
+NOMAD_MODULE=github.com/hashicorp/nomad
+NOMAD_MODULE_VERSION=v1.11.0-rc.1.0.20260917172403-9dcbdc5e64ec
+NOMAD_MODULE_SUM=h1:jRYXUobh6vhOaPtJXibWYFQWQZoBbS6jGAp8XvhG7Ks=
+
+# Nested modules excluded from the main module zip; Nomad builds them from
+# ./api and ./jobspec2 (replace directives in its go.mod).
+NOMAD_API_MODULE_VERSION=v0.0.0-20260917172403-9dcbdc5e64ec
+NOMAD_API_MODULE_SUM=h1:Ch5/OoLR5rcCZHN87SerYc6qL/ghWm9RonZfqGgKVb4=
+NOMAD_JOBSPEC2_MODULE_VERSION=v0.0.0-20260917172403-9dcbdc5e64ec
+NOMAD_JOBSPEC2_MODULE_SUM=h1:LOlFb7SxCJwNx4SPGLYpvef9J8x/Q9/VnIHVkpjGjqs=

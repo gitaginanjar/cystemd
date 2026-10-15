@@ -35,6 +35,29 @@ const (
 	AppMetaKey = "cystemd.app"
 )
 
+// Resource hooks (Argo CD's): batch jobs whose meta HookMetaKey names the
+// phases they run in, around a sync, instead of being synced.
+const (
+	// HookMetaKey lists a job's hook phases, comma-separated.
+	HookMetaKey = "cystemd.hook"
+	// HookDeletePolicyMetaKey lists when the hook job is purged:
+	// BeforeHookCreation (the default), HookSucceeded, HookFailed.
+	HookDeletePolicyMetaKey = "cystemd.hook-delete-policy"
+	// HookTimeoutMetaKey bounds a hook's run (a Go duration, default 30m).
+	HookTimeoutMetaKey = "cystemd.hook-timeout"
+	// HookRunMetaKey is set by the controller to the operation that ran
+	// the hook, so every run is a new job version.
+	HookRunMetaKey = "cystemd.hook-run"
+
+	HookPreSync  = "PreSync"
+	HookPostSync = "PostSync"
+	HookSyncFail = "SyncFail"
+
+	HookDeleteBeforeCreation = "BeforeHookCreation"
+	HookDeleteSucceeded      = "HookSucceeded"
+	HookDeleteFailed         = "HookFailed"
+)
+
 // ObjectMeta is the subset of Kubernetes object metadata CYSTEMD uses.
 type ObjectMeta struct {
 	Name              string            `json:"name" yaml:"name"`
@@ -428,6 +451,9 @@ type ResourceStatus struct {
 	Status          SyncStatusCode `json:"status,omitempty" yaml:"status,omitempty"`
 	Health          *HealthStatus  `json:"health,omitempty" yaml:"health,omitempty"`
 	RequiresPruning bool           `json:"requiresPruning,omitempty" yaml:"requiresPruning,omitempty"`
+	// Hook marks the job of a resource hook: it has no sync status and does
+	// not count towards the Application's sync or health status.
+	Hook bool `json:"hook,omitempty" yaml:"hook,omitempty"`
 	// Version is the live Nomad job version.
 	Version  *uint64 `json:"version,omitempty" yaml:"version,omitempty"`
 	SyncWave int64   `json:"syncWave,omitempty" yaml:"syncWave,omitempty"`

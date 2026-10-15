@@ -261,7 +261,10 @@ func printResources(w io.Writer, rs []v1.ResourceStatus) {
 			h, msg = string(r.Health.Status), r.Health.Message
 		}
 		status := string(r.Status)
-		if r.RequiresPruning {
+		switch {
+		case r.Hook:
+			status = "Hook"
+		case r.RequiresPruning:
 			status += " (requires pruning)"
 		}
 		t.row(r.Kind, orDash(r.Namespace), r.Name, status, orDash(h), msg)

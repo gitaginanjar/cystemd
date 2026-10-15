@@ -95,7 +95,8 @@ func buildTree(tc treeContext, rt *controller.ResourceTree) *views.Tree {
 	// outside CYSTEMD) still show, as Missing.
 	for _, st := range app.Status.Resources {
 		key := st.Kind + "/" + st.Namespace + "/" + st.Name
-		if _, missing := statuses[key]; !missing {
+		// A hook's job that is gone was deleted by its delete policy.
+		if _, missing := statuses[key]; !missing || st.Hook {
 			continue
 		}
 		uid := "missing:" + key
@@ -173,7 +174,8 @@ func (tc treeContext) viewNode(n controller.ResourceNode) views.TreeNode {
 	}
 	switch n.Kind {
 	case v1.KindJob:
-		vn.Info = nonEmpty(info["Type"], prefixed("v", info["Version"]), statusTag(info["Status"], "running"))
+		vn.Hook = info["Hook"] != ""
+		vn.Info = nonEmpty(suffixed(info["Hook"], " hook"), info["Type"], prefixed("v", info["Version"]), statusTag(info["Status"], "running"))
 	case v1.KindTaskGroup:
 		running := info["Running"]
 		if d, ok := info["Desired"]; ok {
@@ -222,6 +224,13 @@ func prefixed(prefix, v string) string {
 	return prefix + v
 }
 
+func suffixed(v, suffix string) string {
+	if v == "" {
+		return ""
+	}
+	return v + suffix
+}
+
 // statusTag shows a status unless it is the boring default.
 func statusTag(status, boring string) string {
 	if status == boring {
@@ -246,7 +255,8 @@ func restarts(n string) string {
 func (tc treeContext) actions(n views.TreeNode, status string) []views.NodeAction {
 	name := tc.app.Metadata.Name
 	var out []views.NodeAction
-	if tc.perms.Sync && (n.Kind == v1.KindJob || n.Kind == v1.KindConsulKV) {
+	// A hook runs with full syncs; it cannot be synced on its own.
+	if tc.perms.Sync && (n.Kind == v1.KindJob || n.Kind == v1.KindConsulKV) && !n.Hook {
 		q := url.Values{"resource": {n.Kind + "/" + n.Namespace + "/" + n.Name}}
 		out = append(out, views.NodeAction{
 			Name: "sync", Label: "Sync", Post: views.AppHref(name) + "/sync?" + q.Encode(),
@@ -257,7 +267,7 @@ func (tc treeContext) actions(n views.TreeNode, status string) []views.NodeActio
 		return out
 	}
 	for _, a := range tc.live.Actions(n.Kind, nil) {
-		if !actionApplies(n.Kind, a.Name, status) {
+		if !actionApplies(n.Kind, a.Name, status) || (n.Hook && a.Name == "start") {
 			continue
 		}
 		q := url.Values{"kind": {n.Kind}, "namespace": {n.Namespace}, "resourceName": {n.Name}, "uid": {n.UID}, "action": {a.Name}}

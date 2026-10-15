@@ -104,13 +104,18 @@ longer rendered, *require pruning*.
 deployment, the allocations of its current version (client status,
 deployment health, Consul or Nomad service checks), queued placements, or
 for batch jobs the outcome of their runs ([internal/health](../internal/health)).
-The Application takes the worst health of its resources.
+The Application takes the worst health of its resources, hooks aside.
 
-**Sync.** An operation runs resources in waves: Consul keys first (wave -1),
-then jobs by their meta `cystemd.sync-wave` (default 0), and, with the
-`PruneLast=true` option, pruning last. Jobs are registered with
-`EnforceIndex`, so a job changed in between fails the operation rather than
-being overwritten blindly. Options follow Argo CD: `CreateNamespace`,
+**Sync.** An operation runs the PreSync hooks, then resources in waves:
+Consul keys first (wave -1), then jobs by their meta `cystemd.sync-wave`
+(default 0), then pruning (always last, so `PruneLast=true` changes nothing).
+Once every job is healthy it runs the PostSync hooks, or the SyncFail hooks
+when something failed. Hooks are batch jobs marked with the meta
+`cystemd.hook`; they are not compared or pruned, each run is a new job, and
+it must complete for the operation to go on
+([APPLICATIONS.md](APPLICATIONS.md#resource-hooks), [ADR 0009](adr/0009-resource-hooks-as-batch-jobs.md)).
+Jobs are registered with `EnforceIndex`, so a job changed in between fails
+the operation rather than being overwritten blindly. Options follow Argo CD: `CreateNamespace`,
 `ApplyOutOfSyncOnly`, `PreserveCounts` (keep scaled counts), `Prune=false`
 (never prune), dry runs, partial syncs, retries with backoff, termination. When it
 succeeds, the operation records a history entry with the job versions Nomad

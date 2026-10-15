@@ -1,6 +1,6 @@
 # 0002. Adopt Argo CD's application model and UX
 
-Status: Accepted
+Status: Accepted. Hooks: amended by [0009](0009-resource-hooks-as-batch-jobs.md).
 
 ## Context
 

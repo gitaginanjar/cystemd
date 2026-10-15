@@ -173,7 +173,7 @@ syncPolicy:
     allowEmpty: false             # allow an automated sync to an empty state
   syncOptions:
     - CreateNamespace=true        # create the destination namespace
-    - PruneLast=true              # prune after everything else
+    - PruneLast=true              # accepted; pruning always comes last
     - ApplyOutOfSyncOnly=true     # leave synced jobs alone
     - PreserveCounts=true         # keep task group counts changed by scaling
     - Prune=false                 # never prune
@@ -196,16 +196,89 @@ corrects drift without a new commit, at most every `self_heal_timeout`
 
 Jobs are registered in waves, by their meta `cystemd.sync-wave` (an integer,
 default 0); Consul keys come first, in wave -1. A wave starts when the
-previous one is registered (not when it is healthy).
+previous one is registered (not when it is healthy). Pruning comes after the
+last wave.
 
 ```hcl
-job "migrate-db" {
-  meta {
+job "cache" {
+  meta = {
     "cystemd.sync-wave" = "-1"
   }
   …
 }
 ```
+
+Meta keys with dots are quoted, so `meta` is written as a map (`meta = {…}`):
+HCL2 does not accept quoted names in a `meta {}` block.
+
+### Resource hooks
+
+As in Argo CD, a sync can run jobs around it: a database migration before the
+new version rolls out, a smoke test after, an alert when it fails. A hook is a
+batch job of the source whose meta `cystemd.hook` says when it runs:
+
+```hcl
+job "migrate-db" {
+  type = "batch"
+
+  meta = {
+    "cystemd.hook"               = "PreSync"
+    "cystemd.hook-delete-policy" = "HookSucceeded"   # optional
+    "cystemd.hook-timeout"       = "10m"             # optional; default 30m
+  }
+
+  group "migrate" {
+    restart {
+      attempts = 0          # a failed migration is not retried…
+      mode     = "fail"
+    }
+    reschedule {
+      attempts  = 0         # …here or elsewhere
+      unlimited = false
+    }
+    task "migrate" {
+      …
+    }
+  }
+}
+```
+
+| Hook | Runs |
+|---|---|
+| `PreSync` | Before anything is synced. If it fails, nothing is. |
+| `PostSync` | After the sync, once every job is healthy or suspended, waiting at most the longest timeout of the PostSync hooks. A degraded job fails the sync instead. |
+| `SyncFail` | When the sync failed: a hook, a resource, or the wait for health. |
+
+A job can be a hook of several phases (`"PostSync,SyncFail"`). The hooks of a
+phase run by sync wave: those of a wave together, the next wave once they all
+succeeded. A hook succeeds when its allocations run to completion, after
+Nomad's restarts and reschedules (the restart and reschedule policies of the
+job apply), and fails when one fails, when its job is stopped, or after its
+timeout. The operation's message says which hook is running, and the hook
+appears in the tree as soon as it starts, with its allocations and logs.
+
+Every run is a new job, marked with the meta `cystemd.hook-run` (the phase,
+the operation's attempt and the revision). An operation that resumes after a
+restart of the controller waits for the run it had started rather than
+starting another. `cystemd.hook-delete-policy` takes Argo CD's policies,
+comma-separated:
+
+| Policy | The hook's job is purged |
+|---|---|
+| `BeforeHookCreation` (default) | when the hook runs again: the last run stays visible |
+| `HookSucceeded` | once it succeeded |
+| `HookFailed` | once it failed |
+
+Hooks are not compared and never pruned: they are shown with the health of
+their last run, without a sync status, and count neither towards the
+Application's sync status nor its health. They run on full syncs only, not on
+partial syncs, and not on rollbacks (which revert job versions). A dry run
+lists them. Terminating the operation stops the running hooks. A job of
+another Application, or one that is not a hook, is never replaced by a hook
+of the same name: the hook fails instead.
+
+Argo CD's `Sync` and `Skip` hooks have no counterpart (the Sync phase is the
+Application's jobs, ordered by waves), nor have `PreDelete` and `PostDelete`.
 
 ### Manual syncs
 

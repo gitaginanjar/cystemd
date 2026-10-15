@@ -193,9 +193,13 @@ func (s *Server) appsPanel(r *http.Request, q url.Values, aq views.AppsQuery, ap
 	return views.EmptyPanel()
 }
 
+// syncResources are the resources a sync can select (hooks are not).
 func syncResources(app *v1.Application) []views.SyncResource {
 	out := make([]views.SyncResource, 0, len(app.Status.Resources))
 	for _, r := range app.Status.Resources {
+		if r.Hook {
+			continue
+		}
 		sr := views.SyncResource{Kind: r.Kind, Namespace: r.Namespace, Name: r.Name, Sync: string(r.Status), Pruning: r.RequiresPruning}
 		if r.Health != nil {
 			sr.Health = string(r.Health.Status)

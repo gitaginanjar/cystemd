@@ -229,9 +229,11 @@ func (c *Controller) terminated(ctx context.Context, name string) bool {
 	return app.Status.OperationState != nil && app.Status.OperationState.Phase == v1.OperationTerminating
 }
 
-// sync applies the desired state: Consul keys (wave -1), then jobs by sync
-// wave, then pruning. Registration is guarded by the live job's modify index,
-// so a change made after the comparison is never silently overwritten.
+// sync applies the desired state: PreSync hooks, Consul keys (wave -1),
+// jobs by sync wave, pruning, then PostSync hooks once the jobs are healthy
+// (SyncFail hooks when something failed). Registration is guarded by the
+// live job's modify index, so a change made after the comparison is never
+// silently overwritten.
 func (c *Controller) sync(ctx context.Context, app *v1.Application, op *v1.Operation, cmp *comparison) (*v1.SyncOperationResult, map[string]uint64, error) {
 	so := op.Sync
 	src := app.Spec.Source
@@ -263,6 +265,29 @@ func (c *Controller) sync(ctx context.Context, app *v1.Application, op *v1.Opera
 	if op.InitiatedBy.Automated && len(manifests.Jobs) == 0 && len(manifests.KV) == 0 &&
 		!(app.Spec.SyncPolicy.Automated != nil && app.Spec.SyncPolicy.Automated.AllowEmpty) {
 		return nil, nil, errors.New("automated sync refused: the desired state is empty (set syncPolicy.automated.allowEmpty to allow)")
+	}
+	hooks, jobs, err := splitHooks(manifests.Jobs)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Hooks run on full syncs only, as in Argo CD.
+	if len(so.Resources) > 0 {
+		hooks = nil
+	}
+	hr := &hookRun{app: app, cluster: cluster, so: so, revision: sha, sources: manifests.Sources, result: result,
+		attempt: attemptOf(app.Status.OperationState)}
+	syncFail := func() (*v1.SyncOperationResult, map[string]uint64, error) {
+		if _, err := c.runHooks(ctx, hr, v1.HookSyncFail, hooks[v1.HookSyncFail]); err != nil {
+			return result, jobVersions, err
+		}
+		return result, jobVersions, nil
+	}
+
+	// 0. PreSync hooks.
+	if ok, err := c.runHooks(ctx, hr, v1.HookPreSync, hooks[v1.HookPreSync]); err != nil {
+		return result, jobVersions, err
+	} else if !ok {
+		return syncFail()
 	}
 
 	// 1. Consul keys.
@@ -304,7 +329,6 @@ func (c *Controller) sync(ctx context.Context, app *v1.Application, op *v1.Opera
 	}
 
 	// 2. Jobs, by sync wave.
-	jobs := append([]*api.Job(nil), manifests.Jobs...)
 	sort.SliceStable(jobs, func(i, j int) bool { return syncWave(jobs[i]) < syncWave(jobs[j]) })
 	ignore := ignoredFields(app)
 	for _, job := range jobs {
@@ -403,7 +427,7 @@ func (c *Controller) sync(ctx context.Context, app *v1.Application, op *v1.Opera
 	}
 	for _, stub := range managed {
 		key := stub.Namespace + "/" + stub.ID
-		if desired[key] || stub.Stop || !selected(so, v1.KindJob, stub.Namespace, stub.ID) {
+		if desired[key] || stub.Stop || isHook(stub.Meta) || !selected(so, v1.KindJob, stub.Namespace, stub.ID) {
 			continue
 		}
 		res := &v1.ResourceResult{Kind: v1.KindJob, Namespace: stub.Namespace, Name: stub.ID, SyncPhase: "Sync"}
@@ -453,6 +477,31 @@ func (c *Controller) sync(ctx context.Context, app *v1.Application, op *v1.Opera
 		}
 		if !so.DryRun && len(keep) != len(owned) {
 			_ = c.store.SetOwnedKeys(ctx, app.Metadata.Name, keep)
+		}
+	}
+
+	// 4. PostSync hooks, once every job is healthy; SyncFail hooks if
+	// anything failed.
+	if anyFailed(result) {
+		return syncFail()
+	}
+	if post := hooks[v1.HookPostSync]; len(post) > 0 {
+		if !so.DryRun {
+			if err := c.waitHealthy(ctx, hr, jobs, postSyncTimeout(post)); err != nil {
+				if errors.Is(err, errTerminated) || ctx.Err() != nil {
+					return result, jobVersions, err
+				}
+				for _, h := range post {
+					result.Resources = append(result.Resources, &v1.ResourceResult{Kind: v1.KindJob, Namespace: deref(h.Namespace),
+						Name: deref(h.ID), SyncPhase: v1.HookPostSync, Status: v1.ResultSyncFailed, Message: "PostSync hook not run: " + err.Error()})
+				}
+				return syncFail()
+			}
+		}
+		if ok, err := c.runHooks(ctx, hr, v1.HookPostSync, post); err != nil {
+			return result, jobVersions, err
+		} else if !ok {
+			return syncFail()
 		}
 	}
 	return result, jobVersions, nil
@@ -593,7 +642,7 @@ func (c *Controller) rollback(ctx context.Context, app *v1.Application, op *v1.O
 		if err == nil {
 			for _, stub := range managed {
 				key := stub.Namespace + "/" + stub.ID
-				if _, ok := entry.JobVersions[key]; ok || stub.Stop {
+				if _, ok := entry.JobVersions[key]; ok || stub.Stop || isHook(stub.Meta) {
 					continue
 				}
 				res := &v1.ResourceResult{Kind: v1.KindJob, Namespace: stub.Namespace, Name: stub.ID, SyncPhase: "Sync"}

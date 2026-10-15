@@ -108,7 +108,10 @@ func TestExamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	j := m.Jobs[0]
+	if len(m.Jobs) != 2 {
+		t.Fatalf("hello: %d jobs", len(m.Jobs))
+	}
+	j, hook := m.Jobs[0], m.Jobs[1]
 	kv := map[string]string{}
 	for _, p := range m.KV {
 		kv[p.Key] = string(p.Value)
@@ -116,5 +119,9 @@ func TestExamples(t *testing.T) {
 	if *j.ID != "hello" || *j.TaskGroups[0].Count != 2 || *j.Namespace != "platform" || len(kv) != 2 ||
 		kv["config/hello/settings"] != "WHOAMI_NAME=hello-production\n" {
 		t.Fatalf("hello: job=%s count=%d ns=%s kv=%v", *j.ID, *j.TaskGroups[0].Count, *j.Namespace, kv)
+	}
+	if *hook.ID != "hello-smoke-test" || *hook.Type != "batch" || hook.Meta[v1.HookMetaKey] != v1.HookPostSync ||
+		hook.Meta[v1.HookDeletePolicyMetaKey] != v1.HookDeleteSucceeded {
+		t.Fatalf("hello's hook: %s %s %v", *hook.ID, *hook.Type, hook.Meta)
 	}
 }

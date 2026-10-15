@@ -186,8 +186,10 @@ func (c *Client) Versions(ctx context.Context, namespace, id string) ([]*api.Job
 	return versions, err
 }
 
+// Allocations lists the job's allocations; not those of an earlier job with
+// the same ID that was purged (a hook job is recreated on every run).
 func (c *Client) Allocations(ctx context.Context, namespace, id string) ([]*api.AllocationListStub, error) {
-	allocs, _, err := c.c.Jobs().Allocations(id, true, q(ctx, namespace))
+	allocs, _, err := c.c.Jobs().Allocations(id, false, q(ctx, namespace))
 	return allocs, err
 }
 

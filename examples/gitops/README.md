@@ -4,7 +4,7 @@ Two applications in the layout CYSTEMD expects:
 
 | Path | Source type | What it shows |
 |---|---|---|
-| `apps/hello` | Nomad jobspecs | HCL2 variables from a var file, a Consul key the app manages and reads in a template |
+| `apps/hello` | Nomad jobspecs | HCL2 variables from a var file, a Consul key the app manages and reads in a template, a PostSync hook that checks the new version answers |
 | `apps/payments-api` | systemd (values file) | The CYSTEMD v4 model: a package version, CPU and memory limits and a config file from Helm-style values, run on a node pool by the systemd driver, secrets from Vault |
 
 `applications/` and `projects/` hold the manifests that create them:

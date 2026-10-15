@@ -247,14 +247,16 @@ func (s *Server) nodePanel(r *http.Request, app *v1.Application, q url.Values, u
 		p.Node = views.TreeNode{UID: uid, Name: uid}
 		return views.NodePanelView(p)
 	}
+	hook := false
 	for _, st := range app.Status.Resources {
 		if st.Kind == p.Node.Kind && st.Namespace == p.Node.Namespace && st.Name == p.Node.Name {
-			p.Node.Sync = string(st.Status)
+			p.Node.Sync, hook = string(st.Status), st.Hook
 		}
 	}
-	managed := p.Node.Kind == v1.KindJob || p.Node.Kind == v1.KindConsulKV
+	// A hook's job has no desired state to compare with.
+	managed := (p.Node.Kind == v1.KindJob || p.Node.Kind == v1.KindConsulKV) && !hook
 	hasLogs := (p.Node.Kind == v1.KindAllocation || p.Node.Kind == v1.KindTask) && perms.Logs
-	hasEvents := p.Node.Kind == v1.KindAllocation || p.Node.Kind == v1.KindTask || managed
+	hasEvents := p.Node.Kind == v1.KindAllocation || p.Node.Kind == v1.KindTask || p.Node.Kind == v1.KindJob || managed
 
 	tabs := []struct{ id, label string }{{"summary", "Summary"}}
 	if !strings.HasPrefix(uid, "missing:") {

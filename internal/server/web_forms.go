@@ -452,10 +452,11 @@ func syncRequestFromForm(v url.Values, app *v1.Application) (SyncRequest, error)
 		req.Retry = &v1.RetryStrategy{Limit: limit}
 	}
 	selected := v["resource"]
-	if len(selected) == 0 && len(app.Status.Resources) > 0 && v.Get("partial") != "" {
+	syncable := len(syncResources(app))
+	if len(selected) == 0 && syncable > 0 && v.Get("partial") != "" {
 		return req, badRequest("select at least one resource to sync")
 	}
-	if len(selected) > 0 && len(selected) < len(app.Status.Resources) {
+	if len(selected) > 0 && len(selected) < syncable {
 		for _, key := range selected {
 			parts := strings.SplitN(key, "/", 3)
 			if len(parts) != 3 {

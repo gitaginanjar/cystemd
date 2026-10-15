@@ -208,6 +208,7 @@ type TreeNode struct {
 	Age       string
 	Root      bool
 	Orphan    bool // requires pruning
+	Hook      bool // a resource hook's job
 	More      int  // a "+N more" placeholder
 	Depth     int
 	Href      string

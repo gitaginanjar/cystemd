@@ -5,6 +5,7 @@ package server
 
 import (
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -110,6 +111,50 @@ func TestTreeLayout(t *testing.T) {
 	groups := nodeGroups(big, rt)
 	if len(groups) != 2 || groups[0].Node != "node-0" {
 		t.Fatalf("node groups: %+v", groups)
+	}
+}
+
+func TestTreeHooks(t *testing.T) {
+	app, rt := testTree(0)
+	app.Status.Resources = append(app.Status.Resources,
+		v1.ResourceStatus{Kind: v1.KindJob, Namespace: "default", Name: "migrate", Hook: true},
+		v1.ResourceStatus{Kind: v1.KindJob, Namespace: "default", Name: "smoke", Hook: true}, // deleted by its policy
+	)
+	rt.Nodes = append(rt.Nodes, controller.ResourceNode{
+		ResourceRef: controller.ResourceRef{Kind: v1.KindJob, Namespace: "default", Name: "migrate", UID: "job:default/migrate"},
+		Health:      &v1.HealthStatus{Status: v1.HealthStatusHealthy},
+		Info:        []controller.InfoItem{{Name: "Type", Value: "batch"}, {Name: "Status", Value: "dead"}, {Name: "Hook", Value: "PreSync"}},
+	})
+	tree := buildTree(treeContext{app: app, view: "tree", perms: views.AppPerms{Sync: true, Action: true}, live: &controller.Live{}}, rt)
+	var hook *views.TreeNode
+	for i, n := range tree.Nodes {
+		switch n.UID {
+		case "job:default/migrate":
+			hook = &tree.Nodes[i]
+		case "missing:Job/default/smoke":
+			t.Fatal("a hook job deleted by its policy shows as missing")
+		}
+	}
+	if hook == nil || !hook.Hook || hook.Sync != "" || strings.Join(hook.Info, ",") != "PreSync hook,batch,dead" || len(hook.Actions) != 0 {
+		t.Fatalf("hook node = %+v", hook)
+	}
+
+	// The sync panel offers the other resources only; selecting all of them
+	// is a full sync, which runs the hooks.
+	var offered []string
+	for _, r := range syncResources(app) {
+		offered = append(offered, r.Name)
+	}
+	if strings.Join(offered, ",") != "web,cystemd/web/config,gone" {
+		t.Fatalf("sync panel resources = %v", offered)
+	}
+	all := url.Values{"resource": {"Job/default/web", "ConsulKV//cystemd/web/config", "Job/default/gone"}}
+	if req, err := syncRequestFromForm(all, app); err != nil || len(req.Resources) != 0 {
+		t.Fatalf("all resources selected: %+v, %v", req.Resources, err)
+	}
+	some := url.Values{"resource": {"Job/default/web"}}
+	if req, err := syncRequestFromForm(some, app); err != nil || len(req.Resources) != 1 {
+		t.Fatalf("one resource selected: %+v, %v", req.Resources, err)
 	}
 }
 

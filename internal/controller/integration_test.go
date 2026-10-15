@@ -382,3 +382,206 @@ func TestControllerManualSyncAndDiff(t *testing.T) {
 		t.Fatalf("events = %v", reasons)
 	}
 }
+
+func hookJobHCL(id, hook, extraMeta string, seconds, exit int) string {
+	return fmt.Sprintf(`
+job %q {
+  type        = "batch"
+  datacenters = ["*"]
+  meta = {
+    "cystemd.hook" = %q
+%s
+  }
+  group "run" {
+    restart {
+      attempts = 0
+      mode     = "fail"
+    }
+    reschedule {
+      attempts  = 0
+      unlimited = false
+    }
+    task "main" {
+      driver = "raw_exec"
+      config {
+        command = "/bin/sh"
+        args    = ["-c", "sleep %d; exit %d"]
+      }
+      resources {
+        cpu    = 20
+        memory = 16
+      }
+    }
+  }
+}
+`, id, hook, extraMeta, seconds, exit)
+}
+
+func TestControllerHooks(t *testing.T) {
+	e := setup(t)
+	files := map[string]string{
+		"hooks/web.nomad.hcl":     sleepJob("web", 1, ""),
+		"hooks/migrate.nomad.hcl": hookJobHCL("migrate", "PreSync", "", 1, 0),
+		"hooks/smoke.nomad.hcl":   hookJobHCL("smoke", "PostSync", `"cystemd.hook-delete-policy" = "HookSucceeded"`, 1, 0),
+		// Two hooks of the same wave run together.
+		"hooks/check-a.nomad.hcl": hookJobHCL("check-a", "PostSync", `"cystemd.sync-wave" = "1"`, 3, 0),
+		"hooks/check-b.nomad.hcl": hookJobHCL("check-b", "PostSync", `"cystemd.sync-wave" = "1"`, 3, 0),
+		"hooks/notify.nomad.hcl":  hookJobHCL("notify", "SyncFail", "", 1, 0),
+	}
+	first := e.repo.Commit(t, "web with hooks", files)
+	_, err := e.store.CreateApplication(e.ctx, &v1.Application{
+		Metadata: v1.ObjectMeta{Name: "hooked"},
+		Spec: v1.ApplicationSpec{Project: "default",
+			Source: v1.ApplicationSource{RepoURL: e.repo.URL(), Path: "hooks", TargetRevision: "master"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Hooks are not compared: only web is missing.
+	a := e.waitApp("hooked", 60*time.Second, func(a *v1.Application) bool {
+		return a.Status.Sync.Status == v1.SyncStatusOutOfSync && a.Status.Sync.Revision == first
+	})
+	if len(a.Status.Resources) != 1 || a.Status.Resources[0].Name != "web" {
+		t.Fatalf("resources = %+v", a.Status.Resources)
+	}
+	live := &controller.Live{Clusters: e.clusters, Repos: e.repos}
+	if diffs, err := live.ManagedResources(e.ctx, a); err != nil || len(diffs) != 1 || diffs[0].Name != "web" {
+		t.Fatalf("managed resources = %+v, %v", diffs, err)
+	}
+
+	syncOp := func(dryRun bool) *v1.Application {
+		t.Helper()
+		started := time.Now().Add(-time.Second)
+		_, err := e.store.MutateApplication(e.ctx, "hooked", func(a *v1.Application) error {
+			a.Operation = &v1.Operation{Sync: &v1.SyncOperation{DryRun: dryRun}, InitiatedBy: v1.OperationInitiator{Username: "admin"}}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e.waitApp("hooked", 3*time.Minute, func(a *v1.Application) bool {
+			st := a.Status.OperationState
+			return a.Operation == nil && st != nil && st.Phase.Completed() && st.StartedAt.After(started)
+		})
+	}
+	results := func(a *v1.Application) string {
+		var out []string
+		for _, r := range a.Status.OperationState.SyncResult.Resources {
+			out = append(out, fmt.Sprintf("%s:%s:%s:%s", r.SyncPhase, r.Name, r.Status, r.Message))
+		}
+		return strings.Join(out, "\n")
+	}
+
+	// 1. A dry run only says what would run.
+	a = syncOp(true)
+	if got, want := results(a), "PreSync:migrate:Synced:PreSync hook would run (dry run)\n"+
+		"Sync:web:Synced:would be updated (dry run)\n"+
+		"PostSync:smoke:Synced:PostSync hook would run (dry run)\n"+
+		"PostSync:check-a:Synced:PostSync hook would run (dry run)\n"+
+		"PostSync:check-b:Synced:PostSync hook would run (dry run)"; got != want {
+		t.Fatalf("dry run results:\n%s\nwant:\n%s", got, want)
+	}
+	if e.job("migrate") != nil || e.job("web") != nil {
+		t.Fatal("dry run created jobs")
+	}
+
+	// 2. A sync runs PreSync, registers web, waits for it to be healthy, runs
+	// PostSync and deletes it (HookSucceeded); SyncFail does not run.
+	a = syncOp(false)
+	if a.Status.OperationState.Phase != v1.OperationSucceeded {
+		t.Fatalf("sync: %s\n%s", a.Status.OperationState.Message, results(a))
+	}
+	if got, want := results(a), "PreSync:migrate:Synced:PreSync hook succeeded\n"+
+		"Sync:web:Synced:job registered\n"+
+		"PostSync:smoke:Synced:PostSync hook succeeded (job deleted)\n"+
+		"PostSync:check-a:Synced:PostSync hook succeeded\n"+
+		"PostSync:check-b:Synced:PostSync hook succeeded"; got != want {
+		t.Fatalf("results:\n%s\nwant:\n%s", got, want)
+	}
+	migrate, web := e.job("migrate"), e.job("web")
+	if migrate == nil || *migrate.Status != "dead" || !strings.HasPrefix(migrate.Meta[v1.HookRunMetaKey], "PreSync ") {
+		t.Fatalf("PreSync hook job = %+v", migrate)
+	}
+	allocs, _, err := e.nomad.Jobs().Allocations("migrate", false, nil)
+	if err != nil || len(allocs) != 1 || allocs[0].ClientStatus != "complete" {
+		t.Fatalf("PreSync allocations = %+v, %v", allocs, err)
+	}
+	finished := allocs[0].TaskStates["main"].FinishedAt
+	if web == nil || time.Unix(0, *web.SubmitTime).Before(finished) {
+		t.Fatalf("web was registered before the PreSync hook finished (%v < %v)", web, finished)
+	}
+	if e.job("smoke") != nil {
+		t.Fatal("PostSync hook job not deleted (HookSucceeded)")
+	}
+	window := func(id string) (time.Time, time.Time) {
+		allocs, _, err := e.nomad.Jobs().Allocations(id, false, nil)
+		if err != nil || len(allocs) != 1 {
+			t.Fatalf("%s allocations = %+v, %v", id, allocs, err)
+		}
+		ts := allocs[0].TaskStates["main"]
+		return ts.StartedAt, ts.FinishedAt
+	}
+	aStart, aEnd := window("check-a")
+	bStart, bEnd := window("check-b")
+	if !bStart.Before(aEnd) || !aStart.Before(bEnd) {
+		t.Fatalf("hooks of a wave ran one after the other: a %v-%v, b %v-%v", aStart, aEnd, bStart, bEnd)
+	}
+	if e.job("notify") != nil {
+		t.Fatal("SyncFail hook ran after a successful sync")
+	}
+	// The hook shows among the resources without a say in the status.
+	a = e.waitApp("hooked", 60*time.Second, func(a *v1.Application) bool {
+		return a.Status.Sync.Status == v1.SyncStatusSynced && a.Status.Health.Status == v1.HealthStatusHealthy && len(a.Status.Resources) == 4
+	})
+	for _, r := range a.Status.Resources {
+		if (r.Name != "web") != r.Hook || (r.Hook && (r.Status != "" || r.Health == nil || r.Health.Status != v1.HealthStatusHealthy)) {
+			t.Fatalf("resources = %+v", a.Status.Resources)
+		}
+	}
+	tree, err := live.Tree(e.ctx, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hookInfo string
+	for _, n := range tree.Nodes {
+		if n.Kind == v1.KindJob && n.Name == "migrate" {
+			for _, i := range n.Info {
+				if i.Name == "Hook" {
+					hookInfo = i.Value
+				}
+			}
+		}
+	}
+	if hookInfo != "PreSync" {
+		t.Fatalf("tree does not show the hook: %+v", tree.Nodes)
+	}
+
+	// 3. A failing PreSync hook stops the sync before web is updated, and
+	// the SyncFail hook runs. The previous run was deleted first
+	// (BeforeHookCreation), so the result is this run's.
+	files["hooks/migrate.nomad.hcl"] = hookJobHCL("migrate", "PreSync", "", 1, 3)
+	files["hooks/web.nomad.hcl"] = sleepJob("web", 2, "")
+	e.repo.Commit(t, "failing migration", files)
+	e.refresh("hooked")
+	e.waitApp("hooked", 60*time.Second, func(a *v1.Application) bool { return a.Status.Sync.Status == v1.SyncStatusOutOfSync })
+	a = syncOp(false)
+	if a.Status.OperationState.Phase != v1.OperationFailed {
+		t.Fatalf("sync with a failing hook: %s\n%s", a.Status.OperationState.Phase, results(a))
+	}
+	if got := results(a); !strings.HasPrefix(got, "PreSync:migrate:SyncFailed:PreSync hook failed: allocation migrate.run[0] failed (task main: Exit Code: 3") ||
+		!strings.HasSuffix(got, "\nSyncFail:notify:Synced:SyncFail hook succeeded") || strings.Contains(got, ":web:") {
+		t.Fatalf("results:\n%s", got)
+	}
+	if j := e.job("web"); *j.TaskGroups[0].Count != 1 {
+		t.Fatal("web was updated although its PreSync hook failed")
+	}
+	if allocs, _, _ := e.nomad.Jobs().Allocations("migrate", false, nil); len(allocs) != 1 {
+		t.Fatalf("PreSync allocations of this run = %+v", allocs)
+	}
+	if n := e.job("notify"); n == nil || *n.Status != "dead" {
+		t.Fatalf("SyncFail hook job = %+v", n)
+	}
+	if a.Status.Sync.Status != v1.SyncStatusOutOfSync {
+		t.Fatalf("sync status after the failed sync = %s", a.Status.Sync.Status)
+	}
+}

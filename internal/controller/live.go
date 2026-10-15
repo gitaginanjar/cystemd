@@ -106,6 +106,9 @@ func (l *Live) jobNodes(ctx context.Context, cluster nomad.API, r v1.ResourceSta
 	if job.NodePool != nil && *job.NodePool != "" {
 		jobNode.Info = append(jobNode.Info, InfoItem{"Node pool", *job.NodePool})
 	}
+	if isHook(job.Meta) {
+		jobNode.Info = append(jobNode.Info, InfoItem{"Hook", job.Meta[v1.HookMetaKey]})
+	}
 	if job.SubmitTime != nil {
 		t := time.Unix(0, *job.SubmitTime).UTC()
 		jobNode.CreatedAt = &t
@@ -485,6 +488,9 @@ func (l *Live) ManagedResources(ctx context.Context, app *v1.Application) ([]Res
 	for _, job := range manifests.Jobs {
 		ns, id := deref(job.Namespace), deref(job.ID)
 		desired[ns+"/"+id] = true
+		if isHook(job.Meta) {
+			continue // run by syncs, not compared
+		}
 		rd := ResourceDiff{Kind: v1.KindJob, Namespace: ns, Name: id}
 		live, err := cluster.Job(ctx, ns, id)
 		if err != nil {

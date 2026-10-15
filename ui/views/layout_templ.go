@@ -394,7 +394,7 @@ func sidebar(p Page) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<li><a class=\"sidebar__item\" href=\"https://github.com/gitaginanjar/cystemd/tree/main/docs\" target=\"_blank\" rel=\"noopener noreferrer\" hx-boost=\"false\" title=\"Documentation\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<li><a class=\"sidebar__item\" href=\"https://github.com/gitaginanjar/cystemd/tree/HEAD/docs\" target=\"_blank\" rel=\"noopener noreferrer\" hx-boost=\"false\" title=\"Documentation\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

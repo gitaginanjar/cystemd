@@ -125,8 +125,12 @@ func (c *Controller) compare(ctx context.Context, app *v1.Application, noCache b
 		return nil, fmt.Errorf("render %s@%s: %w", src.Path, short(sha), err)
 	}
 	cmp.manifests = manifests
+	if _, _, err := splitHooks(manifests.Jobs); err != nil {
+		return nil, fmt.Errorf("render %s@%s: %w", src.Path, short(sha), err)
+	}
 
-	// Desired jobs.
+	// Desired jobs. Hooks are checked against the project too, but they are
+	// run by syncs, not compared.
 	for _, job := range manifests.Jobs {
 		key := render.JobKey(job)
 		dest := app.Spec.Destination
@@ -138,7 +142,9 @@ func (c *Controller) compare(ctx context.Context, app *v1.Application, noCache b
 			return nil, fmt.Errorf("job %s: destination %s/%s/%s is not permitted in project %q",
 				key, dest.ClusterName(), dest.Region, dest.Namespace, project.Metadata.Name)
 		}
-		cmp.desired[key] = job
+		if !isHook(job.Meta) {
+			cmp.desired[key] = job
+		}
 	}
 
 	// Live state and per-job comparison.
@@ -221,6 +227,17 @@ func (c *Controller) compare(ctx context.Context, app *v1.Application, noCache b
 		// Pruning stops a job; Nomad keeps it until garbage collection. A
 		// stopped job no longer in Git is already pruned.
 		if stub.Stop {
+			continue
+		}
+		// A hook's job, from its last run: shown, never pruned, and without
+		// a say in the Application's sync and health status.
+		if isHook(stub.Meta) {
+			rs := v1.ResourceStatus{Kind: v1.KindJob, Namespace: stub.Namespace, Name: stub.ID, Hook: true}
+			if live, err := cluster.Job(ctx, stub.Namespace, stub.ID); err == nil && live != nil {
+				h := c.jobHealth(ctx, cluster, live)
+				rs.Health, rs.Version = &h, live.Version
+			}
+			resources = append(resources, rs)
 			continue
 		}
 		rs := v1.ResourceStatus{Kind: v1.KindJob, Namespace: stub.Namespace, Name: stub.ID,

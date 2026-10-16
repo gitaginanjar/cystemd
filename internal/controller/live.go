@@ -61,6 +61,62 @@ type Live struct {
 	Consul   ConsulKV
 	Checks   ConsulChecks
 	Repos    Repos
+	// Apps reads the Applications an app of apps declares.
+	Apps AppReader
+}
+
+// AppReader reads stored Applications.
+type AppReader interface {
+	GetApplication(ctx context.Context, name string) (*v1.Application, error)
+}
+
+// childApp reads a declared Application (nil when it does not exist).
+func (l *Live) childApp(ctx context.Context, name string) *v1.Application {
+	if l.Apps == nil {
+		return nil
+	}
+	a, err := l.Apps.GetApplication(ctx, name)
+	if err != nil {
+		return nil
+	}
+	return a
+}
+
+// declaredYAML shows an Application as a declaration does: its metadata
+// that a manifest sets, and its spec. With want, only the labels,
+// annotations and finalizers want sets are shown (what is compared).
+func declaredYAML(a, want *v1.Application) string {
+	md := map[string]any{"name": a.Metadata.Name}
+	pick := func(m map[string]string, keep map[string]string) map[string]string {
+		out := map[string]string{}
+		for k, v := range m {
+			if _, ok := keep[k]; ok || want == nil {
+				out[k] = v
+			}
+		}
+		return out
+	}
+	var keepLabels, keepAnnotations map[string]string
+	if want != nil {
+		keepLabels, keepAnnotations = want.Metadata.Labels, want.Metadata.Annotations
+	}
+	if l := pick(a.Metadata.Labels, keepLabels); len(l) > 0 {
+		md["labels"] = l
+	}
+	if an := pick(a.Metadata.Annotations, keepAnnotations); len(an) > 0 {
+		md["annotations"] = an
+	}
+	var fin []string
+	for _, f := range a.Metadata.Finalizers {
+		if want == nil || want.Metadata.HasFinalizer(f) {
+			fin = append(fin, f)
+		}
+	}
+	if len(fin) > 0 {
+		md["finalizers"] = fin
+	}
+	out, _ := toYAML(map[string]any{"metadata": md, "spec": a.Spec})
+	return out
 }
 
 func jobUID(ns, id string) string { return "job:" + ns + "/" + id }
@@ -80,6 +136,15 @@ func (l *Live) Tree(ctx context.Context, app *v1.Application) (*ResourceTree, er
 				return nil, err
 			}
 			tree.Nodes = append(tree.Nodes, nodes...)
+		case v1.KindApplication:
+			child := l.childApp(ctx, r.Name)
+			if child == nil {
+				continue // shown as missing
+			}
+			node := ResourceNode{ResourceRef: ResourceRef{Kind: v1.KindApplication, Name: r.Name, UID: "application:" + r.Name},
+				Health: r.Health, CreatedAt: child.Metadata.CreationTimestamp,
+				Info: []InfoItem{{"Sync", string(child.Status.Sync.Status)}, {"Project", child.Spec.Project}}}
+			tree.Nodes = append(tree.Nodes, node)
 		case v1.KindConsulKV:
 			node := ResourceNode{ResourceRef: ResourceRef{Kind: v1.KindConsulKV, Name: r.Name, UID: "kv:" + r.Name}, Health: r.Health}
 			if l.Consul != nil {
@@ -419,6 +484,12 @@ func (l *Live) LiveManifest(ctx context.Context, app *v1.Application, kind, name
 			}
 		}
 		return toYAML(out)
+	case v1.KindApplication:
+		child := l.childApp(ctx, name)
+		if child == nil {
+			return "", ErrMissing
+		}
+		return toYAML(child)
 	case v1.KindConsulKV:
 		if l.Consul == nil {
 			return "", errors.New("consul is not configured")
@@ -607,11 +678,26 @@ func (l *Live) ManagedResources(ctx context.Context, app *v1.Application) ([]Res
 		rd.Modified = rd.LiveState != rd.TargetState
 		out = append(out, rd)
 	}
+	for _, want := range manifests.Applications {
+		rd := ResourceDiff{Kind: v1.KindApplication, Name: want.Metadata.Name, TargetState: declaredYAML(want, nil), Modified: true}
+		if live := l.childApp(ctx, want.Metadata.Name); live != nil {
+			rd.LiveState = declaredYAML(live, nil)
+			rd.NormalizedLiveState = declaredYAML(live, want)
+			rd.Modified = !appInSync(want, live)
+		}
+		out = append(out, rd)
+	}
 	for _, r := range app.Status.Resources {
 		if !r.RequiresPruning {
 			continue
 		}
 		rd := ResourceDiff{Kind: r.Kind, Namespace: r.Namespace, Name: r.Name, Modified: true, RequiresPruning: true}
+		if r.Kind == v1.KindApplication {
+			if live := l.childApp(ctx, r.Name); live != nil {
+				rd.LiveState = declaredYAML(live, nil)
+				rd.NormalizedLiveState = rd.LiveState
+			}
+		}
 		if r.Kind == v1.KindJob && !desired[r.Namespace+"/"+r.Name] {
 			if live, err := cluster.Job(ctx, r.Namespace, r.Name); err == nil && live != nil {
 				m, _ := diff.Normalize(live)

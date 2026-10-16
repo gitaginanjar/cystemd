@@ -273,7 +273,7 @@ func (tc treeContext) actions(n views.TreeNode, status string) []views.NodeActio
 	name := tc.app.Metadata.Name
 	var out []views.NodeAction
 	// A hook runs with full syncs; it cannot be synced on its own.
-	if tc.perms.Sync && (n.Kind == v1.KindJob || n.Kind == v1.KindConsulKV) && !n.Hook {
+	if tc.perms.Sync && (n.Kind == v1.KindJob || n.Kind == v1.KindConsulKV || n.Kind == v1.KindApplication) && !n.Hook {
 		q := url.Values{"resource": {n.Kind + "/" + n.Namespace + "/" + n.Name}}
 		out = append(out, views.NodeAction{
 			Name: "sync", Label: "Sync", Post: views.AppHref(name) + "/sync?" + q.Encode(),

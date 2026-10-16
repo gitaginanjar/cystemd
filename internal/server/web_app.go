@@ -300,9 +300,10 @@ func (s *Server) nodePanel(r *http.Request, app *v1.Application, q url.Values, u
 		}
 	}
 	// A hook's job has no desired state to compare with.
-	managed := (p.Node.Kind == v1.KindJob || p.Node.Kind == v1.KindConsulKV) && !hook
+	managed := (p.Node.Kind == v1.KindJob || p.Node.Kind == v1.KindConsulKV || p.Node.Kind == v1.KindApplication) && !hook
 	hasLogs := (p.Node.Kind == v1.KindAllocation || p.Node.Kind == v1.KindTask) && perms.Logs
-	hasEvents := (p.Node.Kind == v1.KindAllocation || p.Node.Kind == v1.KindTask || p.Node.Kind == v1.KindJob || managed) && orphan == nil
+	hasEvents := (p.Node.Kind == v1.KindAllocation || p.Node.Kind == v1.KindTask || p.Node.Kind == v1.KindJob || managed) &&
+		orphan == nil && p.Node.Kind != v1.KindApplication
 	if orphan != nil {
 		managed = false
 	}

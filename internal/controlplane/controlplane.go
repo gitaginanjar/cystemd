@@ -191,7 +191,7 @@ func New(ctx context.Context, cfg *config.Config, o Options) (*ControlPlane, err
 		return nil, fmt.Errorf("rbac: %w", err)
 	}
 
-	live := &controller.Live{Clusters: clusters, Consul: consulKV, Checks: checks, Repos: repos}
+	live := &controller.Live{Clusters: clusters, Consul: consulKV, Checks: checks, Repos: repos, Apps: cp.Store}
 	if *cfg.Controller.Enabled {
 		cp.Controller = controller.New(controller.Options{
 			Store: cp.Store, Clusters: clusters, Repos: repos, Consul: consulKV, Checks: checks,

@@ -1053,6 +1053,12 @@ templ NodePanelView(p NodePanel) {
 }
 
 templ nodeActions(p NodePanel) {
+	if p.Node.Kind == v1.KindApplication && !strings.HasPrefix(p.Node.UID, "missing:") {
+		<a class="btn btn--outline" href={ SafeURL(AppHref(p.Node.Name)) }>
+			@Icon("apps")
+			Open application
+		</a>
+	}
 	for _, a := range p.Node.Actions {
 		<button
 			class={ "btn", "btn--outline", templ.KV("btn--danger", a.Danger) }

@@ -686,7 +686,7 @@ templ AccountsView(p AccountsPage) {
 								if a.HasCapability("apiKey") {
 									{ Itoa(len(a.Tokens)) }
 								} else {
-									<span class="faint">-</span>
+									<span class="faint">{ OrDash("") }</span>
 								}
 							</td>
 							<td class="muted">{ AgoPtr(a.PasswordMtime) }</td>
@@ -722,7 +722,7 @@ templ AccountDetailView(p AccountPage) {
 					} else if p.Account.HasCapability("login") {
 						<div class="muted">never set: an administrator sets it (<code>account update-password -account { p.Account.Name }</code>)</div>
 					} else {
-						<div>-</div>
+						<div>{ OrDash("") }</div>
 					}
 				</div>
 			</div>
@@ -756,7 +756,7 @@ templ AccountTokensView(t AccountTokens) {
 				</div>
 			}
 			if t.CanUpdate {
-				<form class="form token-form" hx-post={ AccountHref(t.Account) + "/token" } hx-target="#tokens" hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]">
+				<form class="token-form" hx-post={ AccountHref(t.Account) + "/token" } hx-target="#tokens" hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]">
 					<label class="field">
 						<span class="field__label">Expires in</span>
 						<input class="input" name="expiresIn" value={ t.ExpiresIn } placeholder="never (e.g. 12h, 90d)"/>

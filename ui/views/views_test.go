@@ -57,12 +57,14 @@ func TestHelpers(t *testing.T) {
 	Now = func() time.Time { return now }
 	defer func() { Now = time.Now }()
 	cases := map[time.Duration]string{
-		5 * time.Second:      "just now",
-		90 * time.Second:     "1 minute ago",
-		3 * time.Hour:        "3 hours ago",
-		72 * time.Hour:       "3 days ago",
-		-10 * time.Minute:    "in 10 minutes",
-		400 * 24 * time.Hour: "13 months ago",
+		5 * time.Second:                  "just now",
+		90 * time.Second:                 "1 minute ago",
+		3 * time.Hour:                    "3 hours ago",
+		72 * time.Hour:                   "3 days ago",
+		-10 * time.Minute:                "in 10 minutes",
+		-(30*24*time.Hour - time.Minute): "in 30 days",
+		30*24*time.Hour - time.Minute:    "29 days ago",
+		400 * 24 * time.Hour:             "13 months ago",
 	}
 	for d, want := range cases {
 		if got := Ago(now.Add(-d)); got != want {

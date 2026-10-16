@@ -5,6 +5,7 @@ package views
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"sort"
@@ -30,22 +31,31 @@ func Ago(t time.Time) string {
 	if future {
 		d = -d
 	}
+	// The past is counted in whole units elapsed; the future in the
+	// nearest (an expiry 30 days away, seen a moment later, is "in 30
+	// days").
+	n := func(units float64) int {
+		if future {
+			return int(math.Round(units))
+		}
+		return int(units)
+	}
 	var s string
 	switch {
 	case d < 10*time.Second:
 		return "just now"
 	case d < time.Minute:
-		s = plural(int(d.Seconds()), "second")
+		s = plural(n(d.Seconds()), "second")
 	case d < time.Hour:
-		s = plural(int(d.Minutes()), "minute")
+		s = plural(n(d.Minutes()), "minute")
 	case d < 48*time.Hour:
-		s = plural(int(d.Hours()), "hour")
+		s = plural(n(d.Hours()), "hour")
 	case d < 60*24*time.Hour:
-		s = plural(int(d.Hours()/24), "day")
+		s = plural(n(d.Hours()/24), "day")
 	case d < 730*24*time.Hour:
-		s = plural(int(d.Hours()/24/30), "month")
+		s = plural(n(d.Hours()/24/30), "month")
 	default:
-		s = plural(int(d.Hours()/24/365), "year")
+		s = plural(n(d.Hours()/24/365), "year")
 	}
 	if future {
 		return "in " + s

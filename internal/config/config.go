@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -130,7 +131,26 @@ type AuthConfig struct {
 	// SSO enables single sign-on through the in-cluster Nomad's OIDC auth
 	// methods.
 	SSO *SSOConfig `hcl:"sso,block"`
+	// Accounts declares the local accounts besides the admin (Argo CD's
+	// accounts.<name>): they are created without a password, which the
+	// admin sets, and deleted, tokens and all, when no longer declared.
+	// An "admin" block sets the admin's capabilities.
+	Accounts []AccountConfig `hcl:"account,block"`
 }
+
+// AccountConfig declares a local account.
+type AccountConfig struct {
+	Name string `hcl:"name,label"`
+	// Capabilities: login (with a password, in the UI and the CLI) and
+	// apiKey (API tokens). Default: login.
+	Capabilities []string `hcl:"capabilities,optional"`
+	// Enabled defaults to true.
+	Enabled *bool `hcl:"enabled,optional"`
+}
+
+// accountName is what a local account may be named: a store key and an
+// RBAC subject.
+var accountName = regexp.MustCompile(`^[A-Za-z0-9][-A-Za-z0-9_.@]{0,63}$`)
 
 // SSOConfig is single sign-on through Nomad's OIDC auth methods: the
 // identity provider is configured in Nomad, whose binding rules give the
@@ -345,6 +365,15 @@ func (c *Config) applyDefaults() {
 	if c.Auth.NomadTokenLogin == nil {
 		c.Auth.NomadTokenLogin = boolPtr(true)
 	}
+	for i := range c.Auth.Accounts {
+		a := &c.Auth.Accounts[i]
+		if len(a.Capabilities) == 0 {
+			a.Capabilities = []string{"login"}
+		}
+		if a.Enabled == nil {
+			a.Enabled = boolPtr(true)
+		}
+	}
 	if c.RBAC == nil {
 		c.RBAC = &RBACConfig{}
 	}
@@ -381,6 +410,23 @@ func (c *Config) Validate() error {
 	}
 	if (c.Nomad.ClientCert == "") != (c.Nomad.ClientKey == "") {
 		errs = append(errs, errors.New("nomad: client_cert and client_key go together"))
+	}
+	accounts := map[string]bool{}
+	for _, a := range c.Auth.Accounts {
+		switch {
+		case !accountName.MatchString(a.Name):
+			errs = append(errs, fmt.Errorf("auth: account %q: a name has at most 64 letters, digits and '-', '_', '.', '@'", a.Name))
+		case accounts[a.Name]:
+			errs = append(errs, fmt.Errorf("auth: account %q is declared twice", a.Name))
+		case a.Name == "admin" && !*a.Enabled:
+			errs = append(errs, errors.New(`auth: account "admin": auth.admin_enabled disables the admin`))
+		}
+		accounts[a.Name] = true
+		for _, capability := range a.Capabilities {
+			if capability != "login" && capability != "apiKey" {
+				errs = append(errs, fmt.Errorf("auth: account %q: capability %q is neither login nor apiKey", a.Name, capability))
+			}
+		}
 	}
 	return errors.Join(errs...)
 }

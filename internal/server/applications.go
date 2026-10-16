@@ -183,6 +183,28 @@ func (s *Server) checkProject(ctx context.Context, app *v1.Application) error {
 	return nil
 }
 
+// checkDeclaredProjects: an app of apps may declare Applications in the
+// projects its source names, so whoever names them must be allowed to
+// create applications in each.
+func (s *Server) checkDeclaredProjects(r *http.Request, app *v1.Application) error {
+	as := app.Spec.Source.Applications
+	if as == nil {
+		return nil
+	}
+	for _, p := range as.Projects {
+		if _, err := s.Store.GetProject(r.Context(), p); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return badRequest("spec.source.applications.projects: project %q does not exist", p)
+			}
+			return err
+		}
+		if err := s.authorize(r, "applications", "create", p+"/*"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // createApp creates app; with upsert an existing Application's spec,
 // labels and annotations are replaced instead.
 func (s *Server) createApp(r *http.Request, app *v1.Application, upsert bool) (*v1.Application, error) {
@@ -197,6 +219,9 @@ func (s *Server) createApp(r *http.Request, app *v1.Application, upsert bool) (*
 		return nil, err
 	}
 	if err := s.checkProject(r.Context(), app); err != nil {
+		return nil, err
+	}
+	if err := s.checkDeclaredProjects(r, app); err != nil {
 		return nil, err
 	}
 	created, err := s.Store.CreateApplication(r.Context(), app)
@@ -249,6 +274,9 @@ func (s *Server) updateApp(r *http.Request, cur, in *v1.Application) (*v1.Applic
 		}
 	}
 	if err := s.checkProject(r.Context(), in); err != nil {
+		return nil, err
+	}
+	if err := s.checkDeclaredProjects(r, in); err != nil {
 		return nil, err
 	}
 	update := func(a *v1.Application) {

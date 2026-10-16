@@ -323,6 +323,8 @@ type appFlags struct {
 	consulKV                                   string
 	values, selector, unit, nodeSelector       string
 	replicas                                   int
+	applications                               bool
+	appProjects                                stringList
 }
 
 func (f *appFlags) register(fs *flag.FlagSet) {
@@ -342,6 +344,8 @@ func (f *appFlags) register(fs *flag.FlagSet) {
 	fs.Var(&f.varFiles, "var-file", "")
 	fs.Var(&f.files, "job-file", "")
 	fs.StringVar(&f.consulKV, "consul-kv", "", "")
+	fs.BoolVar(&f.applications, "applications", false, "")
+	fs.Var(&f.appProjects, "applications-project", "")
 	fs.StringVar(&f.values, "systemd-values", "", "")
 	fs.StringVar(&f.selector, "selector", "", "")
 	fs.StringVar(&f.unit, "unit", "", "")
@@ -372,6 +376,13 @@ Spec options:
   -var-file=<path>         HCL2 variable file (repeatable, later wins).
   -var=<name=value>        Variable (repeatable).
   -consul-kv=<path>        File listing the Consul keys the application owns.
+
+  Applications source (an app of apps):
+  -applications            The path holds Application manifests, which the
+                           application creates, updates and prunes.
+  -applications-project=<name>
+                           A project they may belong to (repeatable; default:
+                           this application's own).
 
   systemd source (a v4-style values file):
   -systemd-values=<path>   Values file; selects the systemd source.
@@ -462,6 +473,22 @@ func (f *appFlags) apply(app *v1.Application, set map[string]bool) error {
 		if set["replicas"] {
 			r := f.replicas
 			s.Replicas = &r
+		}
+	}
+	if set["applications"] || set["applications-project"] {
+		switch {
+		case set["applications"] && !f.applications:
+			src.Applications = nil
+		case src.Systemd != nil || set["var"] || set["var-file"] || set["job-file"] || set["consul-kv"]:
+			return errors.New("an Applications source cannot be combined with Nomad or systemd source options")
+		default:
+			src.Nomad = nil
+			if src.Applications == nil {
+				src.Applications = &v1.ApplicationsSource{}
+			}
+			if set["applications-project"] {
+				src.Applications.Projects = append([]string(nil), f.appProjects...)
+			}
 		}
 	}
 	if set["var"] || set["var-file"] || set["job-file"] || set["consul-kv"] {

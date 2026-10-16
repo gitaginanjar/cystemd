@@ -263,6 +263,14 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	s.route(mux, "POST /api/v1/projects/{name}/roles/{role}/token", false, s.handleCreateRoleToken)
 	s.route(mux, "DELETE /api/v1/projects/{name}/roles/{role}/token/{token}", false, s.handleDeleteRoleToken)
 
+	s.route(mux, "GET /api/v1/applicationsets", false, s.handleListAppSets)
+	s.route(mux, "POST /api/v1/applicationsets", false, s.handleCreateAppSet)
+	s.route(mux, "POST /api/v1/applicationsets/generate", false, s.handleGenerateAppSet)
+	s.route(mux, "GET /api/v1/applicationsets/{name}", false, s.handleGetAppSet)
+	s.route(mux, "PUT /api/v1/applicationsets/{name}", false, s.handleUpdateAppSet)
+	s.route(mux, "DELETE /api/v1/applicationsets/{name}", false, s.handleDeleteAppSet)
+	s.route(mux, "POST /api/v1/applicationsets/{name}/refresh", false, s.handleRefreshAppSet)
+
 	s.route(mux, "GET /api/v1/repositories", false, s.handleListRepos)
 	s.route(mux, "POST /api/v1/repositories", false, s.handleCreateRepo)
 	s.route(mux, "DELETE /api/v1/repositories", false, s.handleDeleteRepo)

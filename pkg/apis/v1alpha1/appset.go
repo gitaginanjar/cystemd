@@ -285,6 +285,28 @@ func (a *ApplicationSet) Project() string {
 	return a.Spec.Template.Spec.Project
 }
 
+// GitRepos are the repositories its git generators read.
+func (a *ApplicationSet) GitRepos() []string {
+	var out []string
+	var visit func(gens []ApplicationSetGenerator)
+	visit = func(gens []ApplicationSetGenerator) {
+		for _, g := range gens {
+			switch {
+			case g.Git != nil:
+				if !slices.Contains(out, g.Git.RepoURL) {
+					out = append(out, g.Git.RepoURL)
+				}
+			case g.Matrix != nil:
+				visit(g.Matrix.Generators)
+			case g.Merge != nil:
+				visit(g.Merge.Generators)
+			}
+		}
+	}
+	visit(a.Spec.Generators)
+	return out
+}
+
 var goTemplateOptions = []string{"missingkey=error", "missingkey=zero", "missingkey=default", "missingkey=invalid"}
 
 // Validate checks what can be checked without generating: the generators'

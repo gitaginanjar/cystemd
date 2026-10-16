@@ -135,6 +135,16 @@ func (c *Controller) processAppSet(ctx context.Context, name string) {
 	if set.Metadata.DeletionTimestamp != nil {
 		return // the API deletes it and its Applications
 	}
+	// A refresh (the UI, a webhook) wants Git's current state.
+	if t, err := time.Parse(time.RFC3339Nano, set.Metadata.Annotations[RefreshAnnotation]); err == nil {
+		if inv, ok := c.repos.(interface {
+			InvalidateRevisionBefore(repoURL string, t time.Time)
+		}); ok {
+			for _, repo := range set.GitRepos() {
+				inv.InvalidateRevisionBefore(repo, t)
+			}
+		}
+	}
 	now := c.now().UTC().Truncate(time.Second)
 	apps, genErr := c.appsets.Applications(ctx, set)
 	if genErr != nil {

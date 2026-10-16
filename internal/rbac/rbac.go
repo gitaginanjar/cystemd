@@ -6,7 +6,8 @@
 //	p, <subject>, <resource>, <action>, <object>, <allow|deny>
 //	g, <user or group>, <role>
 //
-// Resources: applications, projects, repositories, clusters, accounts, logs.
+// Resources: applications, applicationsets, projects, repositories,
+// clusters, accounts, logs.
 // Actions: get, create, update, delete, sync, override, action, * …
 // Objects: "<project>/<application>" for applications, a name otherwise.
 // Globs (*) match any characters, "/" included. A deny always wins.
@@ -28,6 +29,7 @@ const (
 
 const builtinPolicy = `
 p, role:readonly, applications, get, */*, allow
+p, role:readonly, applicationsets, get, */*, allow
 p, role:readonly, projects, get, *, allow
 p, role:readonly, repositories, get, *, allow
 p, role:readonly, clusters, get, *, allow

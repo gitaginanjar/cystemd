@@ -114,8 +114,10 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		refreshed = append(refreshed, app.Metadata.Name)
 	}
 	sort.Strings(refreshed)
-	s.logger.Info("webhook", "provider", ev.provider, "repository", firstOf(ev.urls), "refs", ev.refs, "refreshed", refreshed)
-	writeJSON(w, http.StatusOK, map[string]any{"refreshed": refreshed})
+	refreshedSets := s.refreshAppSetsForPush(r.Context(), repos)
+	s.logger.Info("webhook", "provider", ev.provider, "repository", firstOf(ev.urls), "refs", ev.refs, "refreshed", refreshed,
+		"applicationsets", refreshedSets)
+	writeJSON(w, http.StatusOK, map[string]any{"refreshed": refreshed, "applicationSets": refreshedSets})
 }
 
 func (s *Server) webhookSecret() (string, error) {

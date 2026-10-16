@@ -259,6 +259,39 @@ func (s *Server) handleRefreshAppSet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
+// refreshAppSetsForPush refreshes the ApplicationSets whose git generators
+// read a pushed repository (canonical URLs).
+func (s *Server) refreshAppSetsForPush(ctx context.Context, repos map[string]bool) []string {
+	sets, err := s.Store.ListApplicationSets(ctx)
+	if err != nil {
+		s.logger.Warn("webhook: list applicationsets", "error", err)
+		return nil
+	}
+	refreshed := []string{}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, set := range sets {
+		pushed := false
+		for _, u := range set.GitRepos() {
+			pushed = pushed || repos[canonicalRepoURL(u)]
+		}
+		if !pushed {
+			continue
+		}
+		if _, err := s.Store.MutateApplicationSet(ctx, set.Metadata.Name, func(a *v1.ApplicationSet) error {
+			if a.Metadata.Annotations == nil {
+				a.Metadata.Annotations = map[string]string{}
+			}
+			a.Metadata.Annotations[controller.RefreshAnnotation] = now
+			return nil
+		}); err != nil {
+			s.logger.Warn("webhook refresh", "applicationset", set.Metadata.Name, "error", err)
+			continue
+		}
+		refreshed = append(refreshed, set.Metadata.Name)
+	}
+	return refreshed
+}
+
 // GenerateResponse lists the Applications an ApplicationSet would
 // generate (Argo CD's appset generate).
 type GenerateResponse struct {

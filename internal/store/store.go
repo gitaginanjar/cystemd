@@ -497,6 +497,17 @@ type Account struct {
 	// SessionGeneration is carried by the account's session tokens; a
 	// password change increments it, which revokes the older sessions.
 	SessionGeneration int64 `json:"sessionGeneration,omitempty"`
+	// Tokens are the API tokens issued to the account (Argo CD's): a token
+	// is valid while its ID is listed here.
+	Tokens []APIToken `json:"tokens,omitempty"`
+}
+
+// APIToken records an API token; the token itself is handed out once and
+// never stored.
+type APIToken struct {
+	ID        string     `json:"id"`
+	IssuedAt  time.Time  `json:"issuedAt"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
 // ListAccounts returns every local account.
@@ -535,6 +546,42 @@ func (s *Store) PutAccount(ctx context.Context, a *Account) error {
 		return err
 	}
 	return s.kv.Put(ctx, s.key(accountsDir, a.Name), b)
+}
+
+// MutateAccount applies fn to an account and stores it, retrying when the
+// account changed in between.
+func (s *Store) MutateAccount(ctx context.Context, name string, fn func(*Account) error) (*Account, error) {
+	key := s.key(accountsDir, name)
+	for attempt := 0; ; attempt++ {
+		e, err := s.kv.Get(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		var a Account
+		if err := json.Unmarshal(e.Value, &a); err != nil {
+			return nil, err
+		}
+		if err := fn(&a); err != nil {
+			return nil, err
+		}
+		b, err := json.Marshal(&a)
+		if err != nil {
+			return nil, err
+		}
+		err = s.kv.CAS(ctx, key, b, e.ModifyIndex)
+		if errors.Is(err, ErrConflict) && attempt < 20 {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return &a, nil
+	}
+}
+
+// DeleteAccount removes a local account.
+func (s *Store) DeleteAccount(ctx context.Context, name string) error {
+	return s.kv.Delete(ctx, s.key(accountsDir, name))
 }
 
 // CreateAccountIfAbsent stores a only when no account of that name exists

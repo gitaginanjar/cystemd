@@ -44,6 +44,8 @@ type comparison struct {
 	conditions []v1.ApplicationCondition
 	// project is the Application's project (its sync windows).
 	project *v1.AppProject
+	// apps are the Applications an app of apps declares, by name.
+	apps map[string]*v1.Application
 }
 
 // syncWave orders job registration (meta cystemd.sync-wave, default 0).
@@ -305,6 +307,14 @@ func (c *Controller) compare(ctx context.Context, app *v1.Application, noCache b
 		}
 	}
 
+	// Declared Applications (app of apps): shown with their health, which
+	// stays theirs.
+	declared, err := c.compareApps(ctx, app, manifests, cmp)
+	if err != nil {
+		return nil, err
+	}
+	resources = append(resources, declared...)
+
 	// Orphaned jobs in the destination namespace.
 	if settings := project.Spec.OrphanedResources; settings.IsWarn() {
 		orphans, err := orphanedJobs(ctx, cluster, app, settings)
@@ -341,7 +351,7 @@ func (c *Controller) compare(ctx context.Context, app *v1.Application, noCache b
 		}
 	}
 	cmp.health = health.Aggregate(healths)
-	if len(manifests.Jobs) == 0 && len(manifests.KV) == 0 {
+	if len(manifests.Jobs) == 0 && len(manifests.KV) == 0 && len(manifests.Applications) == 0 {
 		cmp.health = v1.HealthStatus{Status: v1.HealthStatusHealthy, Message: "No resources"}
 	}
 	return cmp, nil

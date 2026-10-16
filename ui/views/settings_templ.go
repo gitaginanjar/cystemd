@@ -4480,6 +4480,10 @@ func providerText(p string) string {
 		return "CYSTEMD v4 token"
 	case "anonymous":
 		return "anonymous access"
+	case "sso":
+		return "single sign-on"
+	case "project":
+		return "project role token"
 	}
 	return p
 }

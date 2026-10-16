@@ -237,8 +237,9 @@ func (g *Generator) remember(key string, params []Params) {
 	g.cache[key] = cachedGit{params: params, at: time.Now()}
 }
 
-// walk visits the work tree's entries (not .git), as slash-separated
-// paths relative to root, down to depth (-1: any).
+// walk visits the work tree's entries, as slash-separated paths relative
+// to root, down to depth (-1: any). Hidden ones (.git, .github...) are
+// skipped.
 func walk(root string, depth int, fn func(rel string, d fs.DirEntry) error) error {
 	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -248,8 +249,12 @@ func walk(root string, depth int, fn func(rel string, d fs.DirEntry) error) erro
 			return nil
 		}
 		rel := filepath.ToSlash(strings.TrimPrefix(p, root+string(filepath.Separator)))
-		if d.IsDir() && (d.Name() == ".git" || (depth >= 0 && strings.Count(rel, "/")+1 > depth)) {
+		hidden := strings.HasPrefix(d.Name(), ".")
+		if d.IsDir() && (hidden || (depth >= 0 && strings.Count(rel, "/")+1 > depth)) {
 			return filepath.SkipDir
+		}
+		if hidden {
+			return nil
 		}
 		return fn(rel, d)
 	})

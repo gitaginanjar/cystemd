@@ -17,6 +17,7 @@ import (
 
 	"github.com/gitaginanjar/cystemd/internal/apitest"
 	cycli "github.com/gitaginanjar/cystemd/internal/cli"
+	"github.com/gitaginanjar/cystemd/internal/config"
 	v1 "github.com/gitaginanjar/cystemd/pkg/apis/v1alpha1"
 )
 
@@ -263,6 +264,61 @@ func TestAccountsReposClusters(t *testing.T) {
 	mustOK(t, ctl(t, "", "repo", "list"), "https://127.0.0.1:1/ops.git  ops   stored")
 	mustOK(t, ctl(t, "", "repo", "rm", "https://127.0.0.1:1/ops.git"), "removed")
 	mustOK(t, ctl(t, "", "cluster", "list"), "in-cluster", "http://127.0.0.1:1")
+}
+
+func TestAccountTokens(t *testing.T) {
+	yes := true
+	s := apitest.NewWith(t, func(c *config.Config) {
+		c.Auth.Accounts = []config.AccountConfig{{Name: "ci", Capabilities: []string{"apiKey"}, Enabled: &yes}}
+		c.RBAC.Policy = "p, ci, applications, sync, default/*, allow\n"
+	})
+	isolate(t)
+	login(t, s)
+	mustOK(t, ctl(t, "", "account", "get", "-account", "ci"), "Name:              ci", "apiKey", "No API tokens.")
+	mustFail(t, ctl(t, "", "account", "generate-token", "-account", "ci", "-expires-in", "soon"), "-expires-in")
+	mustFail(t, ctl(t, "", "account", "generate-token"), "account admin does not have the apiKey capability")
+	r := ctl(t, "", "account", "generate-token", "-account", "ci", "-id", "pipeline", "-expires-in", "90d")
+	mustOK(t, r)
+	token := strings.TrimSpace(r.stdout)
+	if strings.Count(token, ".") != 2 || strings.Contains(r.messages, token) {
+		t.Fatalf("token output: %q / %q", r.stdout, r.messages)
+	}
+	mustOK(t, ctl(t, "", "account", "get", "-account", "ci"), "TOKEN ID  ISSUED AT", "pipeline")
+	mustOK(t, ctl(t, "", "account", "can-i", "update", "projects", "default"), "yes")
+
+	// The token works as CYSTEMD_TOKEN.
+	t.Setenv("CYSTEMD_ADDR", s.URL)
+	t.Setenv("CYSTEMD_TOKEN", token)
+	mustOK(t, ctl(t, "", "account", "get-user-info"), "Username:   ci")
+	mustOK(t, ctl(t, "", "account", "get", "-o", "json"), `"id": "pipeline"`)
+	if r := ctl(t, "", "account", "can-i", "sync", "applications", "default/web"); r.stdout != "yes\n" {
+		t.Fatalf("can-i sync default/web: %q", r.stdout)
+	}
+	if r := ctl(t, "", "account", "can-i", "sync", "applications", "platform/web"); r.code != 0 || r.stdout != "no\n" {
+		t.Fatalf("can-i sync platform/web: %d %q", r.code, r.stdout)
+	}
+	mustFail(t, ctl(t, "", "account", "generate-token"), "permission denied")
+
+	t.Setenv("CYSTEMD_TOKEN", "")
+	mustOK(t, ctl(t, "", "account", "delete-token", "-account", "ci", "pipeline"), "Token pipeline of account ci deleted.")
+	mustFail(t, ctl(t, "", "account", "delete-token", "-account", "ci", "pipeline"), `has no token "pipeline"`)
+	mustOK(t, ctl(t, "", "app", "list", "-token", "", "-address", s.URL))
+	t.Setenv("CYSTEMD_TOKEN", token)
+	mustFail(t, ctl(t, "", "account", "get-user-info"), "Log in with")
+}
+
+func TestAdminSetsAnotherPassword(t *testing.T) {
+	yes := true
+	s := apitest.NewWith(t, func(c *config.Config) {
+		c.Auth.Accounts = []config.AccountConfig{{Name: "alice", Capabilities: []string{"login"}, Enabled: &yes}}
+	})
+	isolate(t)
+	login(t, s)
+	mustFail(t, ctl(t, "wrong\nalice-password\nalice-password\n", "account", "update-password", "-account", "alice"), "Error:")
+	mustOK(t, ctl(t, s.Password+"\nalice-password\nalice-password\n", "account", "update-password", "-account", "alice"), "Password of account alice updated.")
+	// The admin's session goes on; alice logs in.
+	mustOK(t, ctl(t, "", "account", "list"), "alice")
+	mustOK(t, ctl(t, "alice-password\n", "login", "-password-stdin", "-username", "alice", s.URL), "as alice")
 }
 
 func TestMigrate(t *testing.T) {

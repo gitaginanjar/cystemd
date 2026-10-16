@@ -198,7 +198,8 @@ Connection options:
     The CYSTEMD server. Overrides CYSTEMD_ADDR and the current context.
 
   -token=<token>
-    A session token. Overrides CYSTEMD_TOKEN and the current context.
+    A session or API token. Overrides CYSTEMD_TOKEN and the current
+    context.
 
   -ca-cert=<path>
     A CA certificate to verify the server with (CYSTEMD_CACERT).

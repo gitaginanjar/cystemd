@@ -55,7 +55,7 @@ cystemd/applications/<name>     Application: metadata, spec, status, operation
 cystemd/projects/<name>         AppProject
 cystemd/repositories/<id>       Repository (no secret material)
 cystemd/repo-creds/<id>         repository credentials, when Vault is not used
-cystemd/accounts/<name>         local account (bcrypt hash)
+cystemd/accounts/<name>         local account (bcrypt hash, API token IDs)
 cystemd/events/<application>    the last 100 events of an Application
 cystemd/owned-kv/<application>  the Consul keys an Application wrote
 cystemd/settings/<name>         server settings (the session signing key)
@@ -175,8 +175,12 @@ agent, the UI replaces Nomad's under `/ui/` and Nomad's own CSP applies.
   ([ADR 0010](adr/0010-sso-through-nomad-oidc.md)). A token's Nomad roles and
   policies become RBAC groups (`nomad:management`, `nomad:role:<name>`,
   `nomad:policy:<name>`). Sessions are HS256 tokens signed with a key kept in
-  the store; changing a password revokes the account's sessions. During a v4
-  migration, v4's Ed25519 JWTs can be accepted as `role:admin`.
+  the store; changing a password revokes the account's sessions. Local
+  accounts besides the admin are declared in the configuration with
+  capabilities (`login`, `apiKey`); an `apiKey` account has API tokens, signed
+  like sessions and valid while the account lists their ID and issue time,
+  so deleting one revokes it ([ADR 0012](adr/0012-local-accounts-and-api-tokens.md)).
+  During a v4 migration, v4's Ed25519 JWTs can be accepted as `role:admin`.
 - **Authorization** is an Argo CD RBAC policy: `role:admin`, `role:readonly`
   and your own roles, matched against `<project>/<application>`.
 - **The browser.** Session cookies are `HttpOnly` and `SameSite=Lax`;

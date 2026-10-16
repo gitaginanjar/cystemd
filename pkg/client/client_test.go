@@ -180,3 +180,18 @@ func TestLogStreamAndErrors(t *testing.T) {
 		t.Error("bad URL accepted")
 	}
 }
+
+func TestParseLifetime(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"": 0, "0": 0, "0s": 0, "12h": 12 * time.Hour, "90d": 90 * 24 * time.Hour, " 30m ": 30 * time.Minute,
+	} {
+		if got, err := client.ParseLifetime(in); err != nil || got != want {
+			t.Errorf("%q: %v %v", in, got, err)
+		}
+	}
+	for _, bad := range []string{"soon", "-1h", "500ms", "1.5d", "-2d", "99999d"} {
+		if _, err := client.ParseLifetime(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

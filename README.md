@@ -42,7 +42,7 @@ converts a v4 installation.
 - **Projects, RBAC, accounts and SSO.** AppProjects restrict sources and
   destinations; an Argo CD-format RBAC policy decides who may do what; users
   log in with a local account, a Nomad ACL token, or single sign-on through
-  Nomad's OIDC auth methods.
+  Nomad's OIDC auth methods; pipelines use API tokens of `apiKey` accounts.
 - **Git webhooks** from GitHub, GitLab, Gitea, Gogs and Bitbucket make the
   comparison immediate.
 

@@ -79,8 +79,12 @@ cystemdctl logout                                     # forget the session
 | `repo list`, `repo add <url>`, `repo rm <url>` | Repository connections (`-username`, `-password` (`-` prompts), `-ssh-private-key-path`, `-insecure`, `-force`) |
 | `cluster list` | Destination clusters, their version and nodes |
 | `account get-user-info` | Who you are, your groups and roles |
-| `account update-password` | Change your password (other sessions end) |
+| `account update-password` | Change your password (other sessions end), or another account's with `-account` (needs `accounts/update` and your own password) |
 | `account list` | Local accounts |
+| `account get` | An account and its API token IDs (`-account`, default yours; `-o json\|yaml`) |
+| `account generate-token` | Generate an API token and print it, once (`-account`, `-expires-in 12h\|90d`, default never; `-id`) |
+| `account delete-token <id>` | Revoke an API token (`-account`) |
+| `account can-i <action> <resource> <object>` | `yes` or `no`: whether RBAC lets you, e.g. `can-i sync applications 'default/*'` |
 | `migrate -config config.yml [-env .env]` | Convert a CYSTEMD v4 installation ([MIGRATION.md](MIGRATION.md)) |
 
 ## In scripts
@@ -89,8 +93,47 @@ cystemdctl logout                                     # forget the session
   times out; `app wait` exits 1 on timeout; `app diff` exits 1 when there are
   differences (`-exit-code=false` to always exit 0), like `diff(1)`.
 - `-o json` and `-o yaml` print the API objects.
-- A token in `CYSTEMD_TOKEN` needs no saved context; in CI, a Nomad token in
-  `NOMAD_TOKEN` with the agent's `cystemd` binary needs nothing else.
+- A token in `CYSTEMD_TOKEN` needs no saved context. In CI, use an API
+  token of an account with the `apiKey` capability (below), or a Nomad token
+  in `NOMAD_TOKEN` with the agent's `cystemd` binary.
+
+## API tokens
+
+Argo CD's local accounts and API tokens. Declare the account in the control
+plane configuration, with the `apiKey` capability, and give it permissions
+in the RBAC policy:
+
+```hcl
+auth {
+  account "ci" {
+    capabilities = ["apiKey"]
+  }
+}
+rbac {
+  policy = <<EOT
+p, ci, applications, get, payments/*, allow
+p, ci, applications, sync, payments/*, allow
+EOT
+}
+```
+
+Then, as the admin (or anyone with `accounts/update` on it):
+
+```sh
+cystemdctl account generate-token -account ci -id gitlab -expires-in 90d   # printed once
+cystemdctl account get -account ci                                         # the token IDs
+cystemdctl account delete-token -account ci gitlab                         # revoked at once
+```
+
+The token is a bearer token: `CYSTEMD_TOKEN`, `-token`, or an
+`Authorization: Bearer` header on the API. It acts as the account, with the
+account's RBAC; it works until it is deleted or expires, or the account is
+disabled, loses the `apiKey` capability or is removed from the
+configuration. A password change does not revoke it. A token can read its own
+account but cannot generate or delete tokens, nor change passwords. An
+account with both `login` and `apiKey` manages its own tokens when logged in
+with its password, from the CLI or from its page in the UI (User info → API
+tokens).
 
 ```sh
 # Deploy a revision and fail the pipeline if it does not become healthy.

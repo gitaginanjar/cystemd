@@ -653,6 +653,8 @@ type AppProject struct {
 	Kind       string         `json:"kind,omitempty" yaml:"kind,omitempty"`
 	Metadata   ObjectMeta     `json:"metadata" yaml:"metadata"`
 	Spec       AppProjectSpec `json:"spec" yaml:"spec"`
+	// Status is the control plane's: what a client sends is ignored.
+	Status AppProjectStatus `json:"status,omitzero" yaml:"status,omitempty"`
 }
 
 // AppProjectSpec lists what a project's Applications may use. Globs: * and ?.
@@ -665,6 +667,9 @@ type AppProjectSpec struct {
 	// OrphanedResources watches the Applications' destination namespaces
 	// for jobs no Application tracks.
 	OrphanedResources *OrphanedResourcesMonitorSettings `json:"orphanedResources,omitempty" yaml:"orphanedResources,omitempty"`
+	// Roles grant permissions on the project's applications to groups and
+	// to project tokens.
+	Roles []ProjectRole `json:"roles,omitempty" yaml:"roles,omitempty"`
 }
 
 // OrphanedResourcesMonitorSettings is Argo CD's: with it, an Application's

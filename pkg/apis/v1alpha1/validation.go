@@ -140,7 +140,7 @@ func (p *AppProject) Validate() error {
 			return fmt.Errorf("syncWindows[%d]: %w", i, err)
 		}
 	}
-	return nil
+	return p.validateRoles()
 }
 
 // SetDefaults fills apiVersion and kind.

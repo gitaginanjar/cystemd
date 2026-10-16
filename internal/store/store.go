@@ -354,24 +354,74 @@ func (s *Store) GetProject(ctx context.Context, name string) (*v1alpha1.AppProje
 	return &p, nil
 }
 
-// PutProject creates or replaces a project, keeping its creation time.
-// With a resourceVersion, it fails with ErrConflict unless the project is
-// still at that version.
+// PutProject creates or replaces a project, keeping its creation time and
+// its status (the tokens of the roles it still has): the status is the
+// control plane's, changed by MutateProject only. With a resourceVersion,
+// it fails with ErrConflict unless the project is still at that version.
 func (s *Store) PutProject(ctx context.Context, p *v1alpha1.AppProject) error {
+	return s.putProject(ctx, p, false)
+}
+
+// MutateProject applies fn to a project, its status included, and stores
+// it, retrying when the project changed in between. The default project
+// is stored on its first change.
+func (s *Store) MutateProject(ctx context.Context, name string, fn func(*v1alpha1.AppProject) error) (*v1alpha1.AppProject, error) {
+	for attempt := 0; ; attempt++ {
+		p, err := s.GetProject(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if p.Metadata.ResourceVersion == "" {
+			p.Metadata.ResourceVersion = "0" // the default project, never stored
+		}
+		if err := fn(p); err != nil {
+			return nil, err
+		}
+		err = s.putProject(ctx, p, true)
+		if errors.Is(err, ErrConflict) && attempt < 20 {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return s.GetProject(ctx, name)
+	}
+}
+
+func (s *Store) putProject(ctx context.Context, p *v1alpha1.AppProject, withStatus bool) error {
 	key := s.key(projectsDir, p.Metadata.Name)
 	c := *p
+	if !withStatus {
+		c.Status = v1alpha1.AppProjectStatus{}
+	}
 	var index uint64
 	cur, err := s.kv.Get(ctx, key)
 	switch {
 	case err == nil:
 		index = cur.ModifyIndex
 		var prev v1alpha1.AppProject
-		if json.Unmarshal(cur.Value, &prev) == nil && prev.Metadata.CreationTimestamp != nil {
-			c.Metadata.CreationTimestamp = prev.Metadata.CreationTimestamp
+		if json.Unmarshal(cur.Value, &prev) == nil {
+			if prev.Metadata.CreationTimestamp != nil {
+				c.Metadata.CreationTimestamp = prev.Metadata.CreationTimestamp
+			}
+			if !withStatus {
+				c.Status = prev.Status
+			}
 		}
 	case !errors.Is(err, ErrNotFound):
 		return err
 	}
+	// Tokens go with their role.
+	var kept map[string]v1alpha1.JWTTokens
+	for role, toks := range c.Status.JWTTokensByRole {
+		if c.Role(role) != nil && len(toks.Items) > 0 {
+			if kept == nil {
+				kept = map[string]v1alpha1.JWTTokens{}
+			}
+			kept[role] = toks
+		}
+	}
+	c.Status.JWTTokensByRole = kept
 	// A resourceVersion makes it a conditional update: the project must not
 	// have changed since it was read.
 	if rv := p.Metadata.ResourceVersion; rv != "" {

@@ -400,6 +400,47 @@ templ ProjectView(p ProjectPage) {
 				}
 			</div>
 			<div class="white-box">
+				<div class="white-box__title">
+					Roles
+					if p.CanUpdate {
+						{{ href := ProjectHref(p.Project.Metadata.Name) + "?panel=new-role" }}
+						<a class="btn btn--sm btn--outline right" href={ SafeURL(href) } hx-get={ href } hx-target="#panel" hx-push-url="true">
+							@Icon("plus", "icon--sm")
+							Add role
+						</a>
+					}
+				</div>
+				if len(p.Project.Spec.Roles) == 0 {
+					<div class="muted">No roles. A role grants permissions on this project's applications to groups, and to the holders of its tokens.</div>
+				} else {
+					<table class="table table--compact">
+						<thead>
+							<tr>
+								<th>Role</th>
+								<th>Description</th>
+								<th>Groups</th>
+								<th>Policies</th>
+								<th>Tokens</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, r := range p.Project.Spec.Roles {
+								<tr class="clickable" hx-get={ RoleHref(p.Project.Metadata.Name, r.Name) } hx-target="#panel" hx-push-url="true">
+									<td class="bold">
+										@Icon("shield", "icon--sm")
+										<a href={ SafeURL(RoleHref(p.Project.Metadata.Name, r.Name)) }>{ r.Name }</a>
+									</td>
+									<td>{ OrDash(r.Description) }</td>
+									<td class="mono">{ JoinOrDash(r.Groups) }</td>
+									<td>{ Itoa(len(r.Policies)) }</td>
+									<td>{ Itoa(len(p.Project.RoleTokens(r.Name))) }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+			<div class="white-box">
 				<div class="white-box__title">Applications</div>
 				if len(p.Apps) == 0 {
 					<div class="muted">No applications use this project.</div>
@@ -471,6 +512,251 @@ templ ProjectPanelView(p ProjectPanel) {
 				@closeButton(p.CloseHref, "Cancel")
 			</div>
 		</form>
+	}
+}
+
+templ NewRolePanelView(p NewRolePanel) {
+	@PanelFrame("Add role to "+p.Project, "shield", p.CloseHref, true, nil) {
+		@panelError(p.Error)
+		<form class="form" hx-post={ ProjectHref(p.Project) + "/roles" } hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+			<div class="form-section">
+				<div class="form-grid">
+					<label class="field">
+						<span class="field__label">Role name</span>
+						<input class="input" name="name" value={ p.Name } required maxlength="63" pattern="[a-zA-Z0-9]([-_a-zA-Z0-9]*[a-zA-Z0-9])?" autocomplete="off"/>
+						<span class="field__help">Its subject in RBAC is proj:{ p.Project }:&lt;name&gt;.</span>
+					</label>
+					<label class="field field--wide">
+						<span class="field__label">Description</span>
+						<input class="input" name="description" value={ p.Description } autocomplete="off"/>
+					</label>
+				</div>
+			</div>
+			<div class="flex">
+				<button class="btn" type="submit">
+					@Icon("check")
+					Create
+				</button>
+				@closeButton(p.CloseHref, "Cancel")
+			</div>
+		</form>
+	}
+}
+
+templ rolePanelActions(p RolePanel) {
+	if p.CanUpdate {
+		<button class="btn btn--outline btn--danger" type="button" hx-post={ RoleActionHref(p.Project, p.Role.Name) } hx-vals={ `{"op":"delete-role"}` } hx-target="#panel" hx-confirm={ "Delete role " + p.Role.Name + "? Its tokens stop working." }>
+			@Icon("trash")
+			Delete
+		</button>
+	}
+}
+
+// RolePanelView shows a project role: its policies, groups and tokens,
+// which the forms change in place.
+templ RolePanelView(p RolePanel) {
+	@PanelFrame("Role "+p.Role.Name, "shield", p.CloseHref, false, rolePanelActions(p)) {
+		@panelError(p.Error)
+		<div class="form-section role-panel">
+			<div class="kv">
+				<div class="kv__key">Subject</div>
+				<div class="mono">{ p.Subject() }</div>
+				<div class="kv__key">Description</div>
+				<div>{ OrDash(p.Role.Description) }</div>
+			</div>
+		</div>
+		<div class="form-section role-panel">
+			<div class="form-section__title">Policies</div>
+			if len(p.Role.Policies) == 0 {
+				<div class="muted">No policies: the role grants nothing yet.</div>
+			} else {
+				<table class="table table--plain table--compact">
+					<thead>
+						<tr>
+							<th>Resource</th>
+							<th>Action</th>
+							<th>Object</th>
+							<th>Permission</th>
+							if p.CanUpdate {
+								<th></th>
+							}
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range p.PolicyRows() {
+							<tr>
+								if row.Parsed {
+									<td>{ row.Policy.Resource }</td>
+									<td class="mono">{ row.Policy.Action }</td>
+									<td class="mono">{ row.Policy.Object }</td>
+									<td>
+										if row.Policy.Allow {
+											allow
+										} else {
+											<b>deny</b>
+										}
+									</td>
+								} else {
+									<td class="mono" colspan="4">{ row.Line }</td>
+								}
+								if p.CanUpdate {
+									<td class="table__actions">
+										<button class="btn btn--sm btn--outline" type="button" hx-post={ RoleActionHref(p.Project, p.Role.Name) } hx-vals={ PolicyVals("remove-policy", row.Line) } hx-target="#panel" title="Remove this policy">
+											@Icon("trash", "icon--sm")
+										</button>
+									</td>
+								}
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+			if p.CanUpdate {
+				<form class="token-form mt" hx-post={ RoleActionHref(p.Project, p.Role.Name) } hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+					<input type="hidden" name="op" value="add-policy"/>
+					<label class="field">
+						<span class="field__label">Resource</span>
+						<select class="select" name="resource">
+							<option value="applications">applications</option>
+							<option value="logs">logs</option>
+						</select>
+					</label>
+					<label class="field">
+						<span class="field__label">Action</span>
+						<input class="input" name="action" list="role-actions" required placeholder="sync"/>
+						<datalist id="role-actions">
+							<option value="get"></option>
+							<option value="sync"></option>
+							<option value="update"></option>
+							<option value="delete"></option>
+							<option value="action"></option>
+							<option value="override"></option>
+							<option value="*"></option>
+						</datalist>
+					</label>
+					<label class="field">
+						<span class="field__label">Object ({ p.Project }/…)</span>
+						<input class="input" name="object" required placeholder="*" autocomplete="off"/>
+					</label>
+					<label class="field">
+						<span class="field__label">Permission</span>
+						<select class="select" name="permission">
+							<option value="allow">allow</option>
+							<option value="deny">deny</option>
+						</select>
+					</label>
+					<button class="btn" type="submit">
+						@Icon("plus")
+						Add policy
+					</button>
+				</form>
+			}
+		</div>
+		<div class="form-section role-panel">
+			<div class="form-section__title">Groups</div>
+			if len(p.Role.Groups) == 0 {
+				<div class="muted">No groups: only the role's tokens have it.</div>
+			} else {
+				<div class="tags">
+					for _, g := range p.Role.Groups {
+						<span class="tag mono">
+							{ g }
+							if p.CanUpdate {
+								<button class="tag__remove" type="button" hx-post={ RoleActionHref(p.Project, p.Role.Name) } hx-vals={ GroupVals("remove-group", g) } hx-target="#panel" title={ "Take the role from " + g } aria-label={ "Remove group " + g }>
+									@Icon("close", "icon--sm")
+								</button>
+							}
+						</span>
+					}
+				</div>
+			}
+			if p.CanUpdate {
+				<form class="token-form mt" hx-post={ RoleActionHref(p.Project, p.Role.Name) } hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+					<input type="hidden" name="op" value="add-group"/>
+					<label class="field field--grow">
+						<span class="field__label">Group</span>
+						<input class="input" name="group" required placeholder="nomad:role:payments" autocomplete="off"/>
+					</label>
+					<button class="btn" type="submit">
+						@Icon("plus")
+						Add group
+					</button>
+				</form>
+				<p class="field__help">The members of a group have the role: an SSO or Nomad token role or policy (nomad:role:&lt;name&gt;, nomad:policy:&lt;name&gt;), or a local account's group.</p>
+			}
+		</div>
+		<div class="form-section role-panel" id="role-tokens">
+			<div class="form-section__title">Tokens</div>
+			if p.NewToken != "" {
+				<div class="alert alert--info token-new">
+					@StatusIcon("Synced")
+					<div>
+						<div class="bold">Token { p.NewID } created. Copy it now: it is not shown again.</div>
+						<div class="token-new__value">
+							<code class="mono" data-token>{ p.NewToken }</code>
+							<button class="btn btn--sm btn--outline" type="button" data-copy={ p.NewToken }>
+								@Icon("copy", "icon--sm")
+								Copy
+							</button>
+						</div>
+					</div>
+				</div>
+			}
+			if p.CanUpdate {
+				<form class="token-form" hx-post={ RoleActionHref(p.Project, p.Role.Name) } hx-target="#panel" hx-disabled-elt="find button[type=submit]">
+					<input type="hidden" name="op" value="create-token"/>
+					<label class="field">
+						<span class="field__label">Expires in</span>
+						<input class="input" name="expiresIn" placeholder="never (e.g. 12h, 90d)"/>
+					</label>
+					<label class="field">
+						<span class="field__label">Token ID</span>
+						<input class="input" name="id" placeholder="random" maxlength="64"/>
+					</label>
+					<button class="btn" type="submit">
+						@Icon("plus")
+						Create token
+					</button>
+				</form>
+			}
+			if len(p.Tokens) == 0 {
+				<div class="muted">No tokens.</div>
+			} else {
+				<table class="table table--plain table--compact">
+					<thead>
+						<tr>
+							<th>ID</th>
+							<th>Issued</th>
+							<th>Expires</th>
+							if p.CanUpdate {
+								<th></th>
+							}
+						</tr>
+					</thead>
+					<tbody>
+						for _, tok := range p.Tokens {
+							<tr>
+								<td class="mono">{ tok.ID }</td>
+								<td title={ UnixTimestamp(tok.IssuedAt) }>{ UnixAgo(tok.IssuedAt) }</td>
+								if tok.ExpiresAt != 0 {
+									<td title={ UnixTimestamp(tok.ExpiresAt) }>{ UnixAgo(tok.ExpiresAt) }</td>
+								} else {
+									<td class="muted">never</td>
+								}
+								if p.CanUpdate {
+									<td class="table__actions">
+										<button class="btn btn--sm btn--outline" type="button" hx-post={ RoleActionHref(p.Project, p.Role.Name) } hx-vals={ TokenVals(tok.ID) } hx-target="#panel" hx-confirm={ "Delete token " + tok.ID + "? Whatever uses it loses access." }>
+											@Icon("trash", "icon--sm")
+											Delete
+										</button>
+									</td>
+								}
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
 	}
 }
 

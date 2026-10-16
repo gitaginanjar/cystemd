@@ -4,6 +4,7 @@
 package views
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/url"
@@ -62,6 +63,31 @@ func Ago(t time.Time) string {
 	}
 	return s + " ago"
 }
+
+// UnixAgo is Ago for Unix seconds.
+func UnixAgo(sec int64) string { return Ago(time.Unix(sec, 0)) }
+
+// UnixTimestamp is Timestamp for Unix seconds.
+func UnixTimestamp(sec int64) string { return Timestamp(time.Unix(sec, 0)) }
+
+// formVals encodes hx-vals: form fields a button posts.
+func formVals(kv ...string) string {
+	m := map[string]string{}
+	for i := 0; i+1 < len(kv); i += 2 {
+		m[kv[i]] = kv[i+1]
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+// PolicyVals posts an operation on a role policy.
+func PolicyVals(op, line string) string { return formVals("op", op, "policy", line) }
+
+// GroupVals posts an operation on a role group.
+func GroupVals(op, group string) string { return formVals("op", op, "group", group) }
+
+// TokenVals deletes a role token.
+func TokenVals(id string) string { return formVals("op", "delete-token", "token", id) }
 
 // AgoPtr is Ago for optional times.
 func AgoPtr(t *time.Time) string {

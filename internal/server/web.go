@@ -94,6 +94,8 @@ func (s *Server) webHandler(csp bool) http.Handler {
 	s.webRoute(mux, "GET /ui/settings/projects/{name}", false, s.webProject)
 	s.webRoute(mux, "POST /ui/settings/projects/{name}", false, s.webUpdateProject)
 	s.webRoute(mux, "POST /ui/settings/projects/{name}/delete", false, s.webDeleteProject)
+	s.webRoute(mux, "POST /ui/settings/projects/{name}/roles", false, s.webCreateRole)
+	s.webRoute(mux, "POST /ui/settings/projects/{name}/roles/{role}", false, s.webRoleOp)
 	s.webRoute(mux, "GET /ui/settings/clusters", false, s.webClusters)
 	s.webRoute(mux, "GET /ui/settings/clusters/{name}", false, s.webCluster)
 	s.webRoute(mux, "GET /ui/settings/accounts", false, s.webAccounts)

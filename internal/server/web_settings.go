@@ -179,9 +179,13 @@ func (s *Server) webProject(w http.ResponseWriter, r *http.Request) {
 	}
 	p.Apps, _ = s.listApps(r, func(a *v1.Application) bool { return a.Spec.Project == name })
 	sort.Slice(p.Apps, func(i, j int) bool { return p.Apps[i].Metadata.Name < p.Apps[j].Metadata.Name })
-	var panel templ.Component
-	if r.URL.Query().Get("panel") == "edit" && p.CanUpdate {
-		panel = views.ProjectPanelView(views.ProjectPanel{Form: projectForm(proj), CloseHref: "/ui/settings/projects/" + url.PathEscape(name)})
+	panel, err := s.projectPanel(r, proj, p.CanUpdate)
+	if err != nil {
+		if htmxTarget(r) == "panel" {
+			s.webFail(w, r, err)
+			return
+		}
+		p.Error = err.Error()
 	}
 	s.renderPage(w, r, panel, func(panel templ.Component) templ.Component {
 		p.Panel = panel

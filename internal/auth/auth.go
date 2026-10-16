@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/gitaginanjar/cystemd/internal/store"
+	v1 "github.com/gitaginanjar/cystemd/pkg/apis/v1alpha1"
 )
 
 // CookieName carries the session token in the browser.
@@ -51,6 +53,9 @@ const (
 	ProviderSSO       = "sso"
 	ProviderLegacy    = "legacy"
 	ProviderAnonymous = "anonymous"
+	// ProviderProject is a project role's token: the identity is the role,
+	// proj:<project>:<role>.
+	ProviderProject = "project"
 )
 
 var (
@@ -151,6 +156,7 @@ type Manager struct {
 	logger    *slog.Logger
 	throttle  *throttle
 	accounts  sync.Map // username → cachedAccount
+	projects  sync.Map // project → cachedProject
 }
 
 type cachedAccount struct {
@@ -379,6 +385,21 @@ func (m *Manager) Verify(ctx context.Context, token string) (*Identity, error) {
 	if claims.IssuedAt != nil {
 		id.IssuedAt = claims.IssuedAt.Time
 	}
+	if id.Provider == ProviderProject {
+		// A role token lives while the project lists it, under a role the
+		// project still has.
+		project, role, ok := v1.ParseRoleSubject(claims.Subject)
+		if !ok || claims.IssuedAt == nil {
+			return nil, ErrUnauthenticated
+		}
+		roles, err := m.projectState(ctx, project)
+		iat, listed := roles[role][claims.ID]
+		if err != nil || !listed || claims.IssuedAt.Unix() != iat {
+			return nil, ErrUnauthenticated
+		}
+		id.Groups, id.TokenID = nil, claims.ID
+		return id, nil
+	}
 	if id.Provider == ProviderLocal {
 		if id.Username == AdminUser && !m.adminOn {
 			return nil, ErrUnauthenticated
@@ -427,6 +448,118 @@ func (m *Manager) accountState(ctx context.Context, user string) (cachedAccount,
 	}
 	m.accounts.Store(user, ca)
 	return ca, nil
+}
+
+// cachedProject is what Verify needs of a project: its roles' tokens.
+type cachedProject struct {
+	roles map[string]map[string]int64 // role → token ID → issued at
+	at    time.Time
+}
+
+// projectState is the tokens of a project's roles, cached like accounts.
+func (m *Manager) projectState(ctx context.Context, project string) (map[string]map[string]int64, error) {
+	if c, ok := m.projects.Load(project); ok {
+		cp := c.(cachedProject)
+		if time.Since(cp.at) < 10*time.Second {
+			return cp.roles, nil
+		}
+	}
+	p, err := m.store.GetProject(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	roles := map[string]map[string]int64{}
+	for _, r := range p.Spec.Roles {
+		roles[r.Name] = map[string]int64{}
+		for _, t := range p.RoleTokens(r.Name) {
+			roles[r.Name][t.ID] = t.IssuedAt
+		}
+	}
+	m.projects.Store(project, cachedProject{roles: roles, at: time.Now()})
+	return roles, nil
+}
+
+// ForgetProject drops what is cached of a project, which just changed.
+func (m *Manager) ForgetProject(project string) { m.projects.Delete(project) }
+
+// GenerateProjectToken issues a token of a project role: its holder acts
+// as the role. ttl 0 never expires; an empty id is chosen at random.
+func (m *Manager) GenerateProjectToken(ctx context.Context, project, role, id string, ttl time.Duration) (string, v1.JWTToken, error) {
+	id, err := tokenID(id)
+	if err != nil {
+		return "", v1.JWTToken{}, err
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	rec := v1.JWTToken{ID: id, IssuedAt: now.Unix()}
+	exp := now.AddDate(100, 0, 0) // does not expire
+	if ttl > 0 {
+		exp = now.Add(ttl)
+		rec.ExpiresAt = exp.Unix()
+	}
+	_, err = m.store.MutateProject(ctx, project, func(p *v1.AppProject) error {
+		if p.Role(role) == nil {
+			return &RequestError{msg: fmt.Sprintf("project %s has no role %q", project, role), NotFound: true}
+		}
+		var kept []v1.JWTToken
+		for _, t := range p.RoleTokens(role) {
+			if t.ID == id {
+				return refuse("role %s of project %s already has a token %q", role, project, id)
+			}
+			if t.ExpiresAt == 0 || t.ExpiresAt > now.Unix() {
+				kept = append(kept, t)
+			}
+		}
+		if p.Status.JWTTokensByRole == nil {
+			p.Status.JWTTokensByRole = map[string]v1.JWTTokens{}
+		}
+		p.Status.JWTTokensByRole[role] = v1.JWTTokens{Items: append(kept, rec)}
+		return nil
+	})
+	m.ForgetProject(project)
+	if err != nil {
+		return "", v1.JWTToken{}, err
+	}
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer: "cystemd", Subject: v1.RoleSubject(project, role), ID: id,
+			IssuedAt: jwt.NewNumericDate(now), NotBefore: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(exp),
+		},
+		Provider: ProviderProject,
+	}
+	tok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(m.key)
+	return tok, rec, err
+}
+
+// DeleteProjectToken revokes a role token, named by its ID or its issue
+// time (Unix seconds, as Argo CD names them).
+func (m *Manager) DeleteProjectToken(ctx context.Context, project, role, token string) error {
+	_, err := m.store.MutateProject(ctx, project, func(p *v1.AppProject) error {
+		if p.Role(role) == nil {
+			return &RequestError{msg: fmt.Sprintf("project %s has no role %q", project, role), NotFound: true}
+		}
+		toks := p.RoleTokens(role)
+		i := slices.IndexFunc(toks, func(t v1.JWTToken) bool { return t.ID == token || strconv.FormatInt(t.IssuedAt, 10) == token })
+		if i < 0 {
+			return &RequestError{msg: fmt.Sprintf("role %s of project %s has no token %q", role, project, token), NotFound: true}
+		}
+		p.Status.JWTTokensByRole[role] = v1.JWTTokens{Items: slices.Delete(slices.Clone(toks), i, i+1)}
+		return nil
+	})
+	m.ForgetProject(project)
+	return err
+}
+
+// tokenID checks a token ID, or chooses one at random.
+func tokenID(id string) (string, error) {
+	if id == "" {
+		b := make([]byte, 9)
+		_, _ = rand.Read(b)
+		return base64.RawURLEncoding.EncodeToString(b), nil
+	}
+	if strings.ContainsAny(id, " /?#%") || len(id) > 64 {
+		return "", refuse("a token ID has at most 64 characters, none of them a space, '/', '?', '#' or '%%'")
+	}
+	return id, nil
 }
 
 // FromRequest authenticates a request (bearer token, then session cookie).
@@ -529,12 +662,9 @@ func (m *Manager) SyncAccounts(ctx context.Context, declared []DeclaredAccount) 
 // GenerateToken issues an API token for an account with the apiKey
 // capability; ttl 0 never expires. An empty id is chosen at random.
 func (m *Manager) GenerateToken(ctx context.Context, account, id string, ttl time.Duration) (string, store.APIToken, error) {
-	if id == "" {
-		b := make([]byte, 9)
-		_, _ = rand.Read(b)
-		id = base64.RawURLEncoding.EncodeToString(b)
-	} else if strings.ContainsAny(id, " /?#%") || len(id) > 64 {
-		return "", store.APIToken{}, refuse("a token ID has at most 64 characters, none of them a space, '/', '?', '#' or '%%'")
+	id, err := tokenID(id)
+	if err != nil {
+		return "", store.APIToken{}, err
 	}
 	if account == AdminUser && !m.adminOn {
 		return "", store.APIToken{}, refuse("the admin account is disabled")

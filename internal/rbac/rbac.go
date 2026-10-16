@@ -41,6 +41,22 @@ type rule struct {
 	allow                             bool
 }
 
+// Grant is policy that applies to one caller besides the configured one:
+// subjects it holds (a project role, proj:<project>:<role>) and their
+// rules. A deny still wins over any allow.
+type Grant struct {
+	Subjects []string
+	rules    []rule
+}
+
+// Allow adds a rule of one of the grant's subjects.
+func (g *Grant) Allow(subject, resource, action, object string, allow bool) {
+	g.rules = append(g.rules, rule{subject, resource, action, object, allow})
+}
+
+// Empty reports whether the grant adds nothing.
+func (g *Grant) Empty() bool { return g == nil || len(g.Subjects) == 0 }
+
 // Enforcer evaluates a policy.
 type Enforcer struct {
 	mu          sync.RWMutex
@@ -119,21 +135,39 @@ func (e *Enforcer) subjects(user string, groups []string) []string {
 // Enforce reports whether user (member of groups) may perform action on
 // object of resource.
 func (e *Enforcer) Enforce(user string, groups []string, resource, action, object string) bool {
+	return e.EnforceWith(user, groups, nil, resource, action, object)
+}
+
+// EnforceWith is Enforce with a grant's subjects and rules added.
+func (e *Enforcer) EnforceWith(user string, groups []string, g *Grant, resource, action, object string) bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	subjects := e.subjects(user, groups)
+	if !g.Empty() {
+		subjects = append(subjects, g.Subjects...)
+	}
 	allowed := false
-	for _, s := range e.subjects(user, groups) {
-		for _, r := range e.rules {
-			if r.subject != s || !match(r.resource, resource) || !match(r.action, action) || !match(r.object, object) {
-				continue
+	for _, s := range subjects {
+		for _, rules := range [][]rule{e.rules, grantRules(g)} {
+			for _, r := range rules {
+				if r.subject != s || !match(r.resource, resource) || !match(r.action, action) || !match(r.object, object) {
+					continue
+				}
+				if !r.allow {
+					return false
+				}
+				allowed = true
 			}
-			if !r.allow {
-				return false
-			}
-			allowed = true
 		}
 	}
 	return allowed
+}
+
+func grantRules(g *Grant) []rule {
+	if g == nil {
+		return nil
+	}
+	return g.rules
 }
 
 // Roles lists the roles user holds (for the user-info page).

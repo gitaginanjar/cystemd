@@ -158,7 +158,7 @@ type cachedAccount struct {
 	enabled    bool
 	apiKey     bool
 	groups     []string
-	tokens     map[string]bool
+	tokens     map[string]time.Time // API token ID → issued at
 	at         time.Time
 }
 
@@ -388,9 +388,11 @@ func (m *Manager) Verify(ctx context.Context, token string) (*Identity, error) {
 			return nil, ErrUnauthenticated
 		}
 		if claims.APIKey {
-			// An API token lives while the account lists it; a password
-			// change does not revoke it.
-			if !st.apiKey || !st.tokens[claims.ID] {
+			// An API token lives while the account lists it (issued at the
+			// same time: a token deleted, then generated again with its ID,
+			// is another one); a password change does not revoke it.
+			iat, ok := st.tokens[claims.ID]
+			if !st.apiKey || !ok || claims.IssuedAt == nil || !claims.IssuedAt.Equal(iat) {
 				return nil, ErrUnauthenticated
 			}
 			id.TokenID = claims.ID
@@ -419,9 +421,9 @@ func (m *Manager) accountState(ctx context.Context, user string) (cachedAccount,
 		return cachedAccount{}, err
 	}
 	ca := cachedAccount{generation: acct.SessionGeneration, enabled: acct.Enabled, groups: acct.Groups,
-		apiKey: slices.Contains(acct.Capabilities, CapabilityAPIKey), tokens: map[string]bool{}, at: time.Now()}
+		apiKey: slices.Contains(acct.Capabilities, CapabilityAPIKey), tokens: map[string]time.Time{}, at: time.Now()}
 	for _, t := range acct.Tokens {
-		ca.tokens[t.ID] = true
+		ca.tokens[t.ID] = t.IssuedAt
 	}
 	m.accounts.Store(user, ca)
 	return ca, nil

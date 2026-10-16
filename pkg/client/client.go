@@ -671,6 +671,15 @@ type Account struct {
 	Capabilities  []string   `json:"capabilities,omitempty"`
 	Groups        []string   `json:"groups,omitempty"`
 	PasswordMtime *time.Time `json:"passwordMtime,omitempty"`
+	Tokens        []Token    `json:"tokens,omitempty"`
+}
+
+// Token describes an API token; the token itself is shown once, when
+// generated.
+type Token struct {
+	ID        string     `json:"id"`
+	IssuedAt  time.Time  `json:"issuedAt"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
 // ListAccounts lists the local accounts.
@@ -679,4 +688,51 @@ func (c *Client) ListAccounts(ctx context.Context) ([]Account, error) {
 		Items []Account `json:"items"`
 	}
 	return out.Items, c.do(ctx, http.MethodGet, "/api/v1/accounts", nil, nil, &out)
+}
+
+// GetAccount describes a local account.
+func (c *Client) GetAccount(ctx context.Context, name string) (*Account, error) {
+	var out Account
+	return &out, c.do(ctx, http.MethodGet, "/api/v1/accounts/"+esc(name), nil, nil, &out)
+}
+
+// GenerateToken issues an API token for an account with the apiKey
+// capability: an empty id is chosen by the server, expiresIn 0 never
+// expires.
+func (c *Client) GenerateToken(ctx context.Context, account, id string, expiresIn time.Duration) (string, *Token, error) {
+	var out struct {
+		Secret string `json:"token"`
+		Token
+	}
+	body := map[string]any{"id": id, "expiresIn": int64(expiresIn / time.Second)}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/accounts/"+esc(account)+"/token", nil, body, &out); err != nil {
+		return "", nil, err
+	}
+	return out.Secret, &out.Token, nil
+}
+
+// DeleteToken revokes an account's API token.
+func (c *Client) DeleteToken(ctx context.Context, account, id string) error {
+	return c.do(ctx, http.MethodDelete, "/api/v1/accounts/"+esc(account)+"/token/"+esc(id), nil, nil, nil)
+}
+
+// SetAccountPassword sets another local account's password, which needs
+// accounts/update; current is the caller's own password.
+func (c *Client) SetAccountPassword(ctx context.Context, account, current, next string) error {
+	return c.do(ctx, http.MethodPut, "/api/v1/account/password", nil,
+		map[string]string{"name": account, "currentPassword": current, "newPassword": next}, nil)
+}
+
+// CanI reports whether the caller may perform action on object of
+// resource (an application object is <project>/<application>).
+func (c *Client) CanI(ctx context.Context, action, resource, object string) (bool, error) {
+	var out struct {
+		Value string `json:"value"`
+	}
+	segs := []string{esc(resource), esc(action)}
+	for _, p := range strings.Split(object, "/") {
+		segs = append(segs, esc(p))
+	}
+	err := c.do(ctx, http.MethodGet, "/api/v1/account/can-i/"+strings.Join(segs, "/"), nil, nil, &out)
+	return out.Value == "yes", err
 }

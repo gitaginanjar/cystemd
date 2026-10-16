@@ -469,7 +469,9 @@ type RequestError struct {
 
 func (e *RequestError) Error() string { return e.msg }
 
-func refuse(format string, args ...any) error { return &RequestError{msg: fmt.Sprintf(format, args...)} }
+func refuse(format string, args ...any) error {
+	return &RequestError{msg: fmt.Sprintf(format, args...)}
+}
 
 // DeclaredAccount is a local account of the configuration.
 type DeclaredAccount struct {

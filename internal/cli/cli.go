@@ -119,11 +119,15 @@ func Commands(ui cli.Ui, o Options) map[string]cli.CommandFactory {
 		"cluster list": func() (cli.Command, error) { return &clusterListCommand{meta: m()}, nil },
 
 		"account": func() (cli.Command, error) {
-			return &groupCommand{meta: m(), name: "account", synopsis: "Manage your account"}, nil
+			return &groupCommand{meta: m(), name: "account", synopsis: "Manage accounts and API tokens"}, nil
 		},
 		"account get-user-info":   func() (cli.Command, error) { return &accountInfoCommand{meta: m()}, nil },
 		"account update-password": func() (cli.Command, error) { return &accountPasswordCommand{meta: m()}, nil },
 		"account list":            func() (cli.Command, error) { return &accountListCommand{meta: m()}, nil },
+		"account get":             func() (cli.Command, error) { return &accountGetCommand{meta: m()}, nil },
+		"account generate-token":  func() (cli.Command, error) { return &accountGenerateTokenCommand{meta: m()}, nil },
+		"account delete-token":    func() (cli.Command, error) { return &accountDeleteTokenCommand{meta: m()}, nil },
+		"account can-i":           func() (cli.Command, error) { return &accountCanICommand{meta: m()}, nil },
 
 		"migrate": func() (cli.Command, error) { return &migrateCommand{meta: m()}, nil },
 	}

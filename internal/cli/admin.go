@@ -420,21 +420,34 @@ func (c *accountInfoCommand) Run(args []string) int {
 
 type accountPasswordCommand struct{ *meta }
 
-func (c *accountPasswordCommand) Synopsis() string { return "Change your password" }
+func (c *accountPasswordCommand) Synopsis() string { return "Change a password" }
 func (c *accountPasswordCommand) Help() string {
-	return `Usage: ` + c.opts.Name + ` account update-password
+	return `Usage: ` + c.opts.Name + ` account update-password [options]
 
-  Changes the password of the local account you are logged in as
-  (prompted for). Other sessions of the account are signed out.
+  Changes the password of the local account you are logged in as, or of
+  another one (prompted for). The account's other sessions are signed
+  out; its API tokens keep working.
+
+Options:
+
+  -account=<name>  Set another account's password: needs the
+                   accounts/update permission, and your own current
+                   password. A declared account has none until set so.
 ` + c.connectionHelp()
 }
 
 func (c *accountPasswordCommand) Run(args []string) int {
+	var account string
 	fs := c.flagSet("account update-password", true)
-	if _, ok := c.parse(fs, args, 0, c.opts.Name+" account update-password"); !ok {
+	fs.StringVar(&account, "account", "", "")
+	if _, ok := c.parse(fs, args, 0, c.opts.Name+" account update-password [options]"); !ok {
 		return 1
 	}
-	current, err := c.ui.AskSecret("Current password:")
+	prompt := "Current password:"
+	if account != "" {
+		prompt = "Your current password:"
+	}
+	current, err := c.ui.AskSecret(prompt)
 	if err != nil {
 		return c.fail(err)
 	}
@@ -454,6 +467,13 @@ func (c *accountPasswordCommand) Run(args []string) int {
 	cl, err := c.connect(ctx)
 	if err != nil {
 		return c.fail(err)
+	}
+	if account != "" {
+		if err := cl.SetAccountPassword(ctx, account, current, next); err != nil {
+			return c.fail(err)
+		}
+		c.ui.Output(fmt.Sprintf("Password of account %s updated.", account))
+		return 0
 	}
 	if err := cl.UpdatePassword(ctx, current, next); err != nil {
 		return c.fail(err)

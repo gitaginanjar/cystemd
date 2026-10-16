@@ -18,6 +18,7 @@ import (
 
 	"github.com/hashicorp/nomad/api"
 
+	"github.com/gitaginanjar/cystemd/internal/appset"
 	"github.com/gitaginanjar/cystemd/internal/metrics"
 	"github.com/gitaginanjar/cystemd/internal/nomad"
 	"github.com/gitaginanjar/cystemd/internal/store"
@@ -70,6 +71,11 @@ type Controller struct {
 	plans planCache
 	queue *workQueue
 
+	// appsets generates ApplicationSets' Applications (nil: none are
+	// reconciled); setQueue holds the sets to reconcile.
+	appsets  *appset.Generator
+	setQueue *workQueue
+
 	// jobOwners routes Nomad events: "<ns>/<job>" → Application.
 	ownersMu  sync.RWMutex
 	jobOwners map[string]string
@@ -86,6 +92,8 @@ type Options struct {
 	Logger  *slog.Logger
 	Metrics *metrics.Metrics
 	Config  Config
+	// AppSets generates ApplicationSets' Applications.
+	AppSets *appset.Generator
 }
 
 // New returns a controller.
@@ -100,7 +108,7 @@ func New(o Options) *Controller {
 	return &Controller{
 		store: o.Store, clusters: o.Clusters, repos: o.Repos, consul: o.Consul, checks: o.Checks,
 		logger: o.Logger.With("component", "controller"), metrics: o.Metrics, cfg: o.Config,
-		now: time.Now, queue: newWorkQueue(), jobOwners: map[string]string{},
+		now: time.Now, queue: newWorkQueue(), jobOwners: map[string]string{}, appsets: o.AppSets,
 	}
 }
 
@@ -129,15 +137,40 @@ func (c *Controller) Run(ctx context.Context) {
 		}()
 	}
 
+	// ApplicationSets, on the leader too.
+	if c.appsets != nil {
+		sets := newWorkQueue()
+		c.setQueue = sets
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.runAppSets(ctx, sets)
+		}()
+	}
+
 	// Store changes: new Applications, spec edits, operations, refresh
 	// requests and deletions all arrive here.
 	go func() {
+		// What ApplicationSets control of their Applications, to reconcile
+		// a set when one of its Applications is edited or goes (and not on
+		// every status write).
+		fingerprints := map[string]string{}
 		for ev := range c.store.WatchApplications(ctx) {
 			// An app of apps compares again when one of its Applications
 			// changes or goes (self-heal of what is done outside Git).
 			if ev.Application != nil {
 				if parent := ev.Application.Metadata.Labels[v1.AppMetaKey]; parent != "" {
 					queue.add(parent, false)
+				}
+				if set := ev.Application.Metadata.Labels[v1.AppSetLabelKey]; set != "" && c.setQueue != nil {
+					fp := appFingerprint(ev.Application)
+					if ev.Type == store.EventDeleted || fingerprints[ev.Application.Metadata.Name] != fp {
+						c.setQueue.add(set, false)
+					}
+					fingerprints[ev.Application.Metadata.Name] = fp
+				}
+				if ev.Type == store.EventDeleted {
+					delete(fingerprints, ev.Application.Metadata.Name)
 				}
 			}
 			if ev.Type == store.EventDeleted {

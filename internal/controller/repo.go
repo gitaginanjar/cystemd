@@ -170,3 +170,9 @@ func (r *RepoService) Manifests(ctx context.Context, app *v1alpha1.Application, 
 func (r *RepoService) Commit(ctx context.Context, repoURL, sha string) (*git.CommitMetadata, error) {
 	return r.Git.Commit(ctx, repoURL, sha)
 }
+
+// Checkout calls fn with the work tree of repoURL at sha (the
+// ApplicationSets' git generator).
+func (r *RepoService) Checkout(ctx context.Context, repoURL, sha string, fn func(dir string) error) error {
+	return r.Git.Checkout(ctx, repoURL, sha, fn)
+}

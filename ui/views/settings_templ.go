@@ -70,7 +70,7 @@ func SettingsView(p SettingsPage) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = settingsTile("/ui/settings/accounts", "key", "Accounts", "Local accounts that can sign in.").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = settingsTile("/ui/settings/accounts", "key", "Accounts", "Local accounts and their API tokens.").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

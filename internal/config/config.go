@@ -56,20 +56,25 @@ type NomadConfig struct {
 	ClientKey     string `hcl:"client_key,optional"`
 	TLSServerName string `hcl:"tls_server_name,optional"`
 	TLSSkipVerify bool   `hcl:"tls_skip_verify,optional"`
+	// Labels describe the in-cluster destination to ApplicationSets'
+	// clusters generators.
+	Labels map[string]string `hcl:"labels,optional"`
 }
 
 // ClusterConfig registers an additional Nomad cluster as a destination.
 type ClusterConfig struct {
-	Name          string `hcl:"name,label"`
-	Address       string `hcl:"address"`
-	Region        string `hcl:"region,optional"`
-	Token         string `hcl:"token,optional"`
-	TokenFile     string `hcl:"token_file,optional"`
-	CACert        string `hcl:"ca_cert,optional"`
-	ClientCert    string `hcl:"client_cert,optional"`
-	ClientKey     string `hcl:"client_key,optional"`
-	TLSServerName string `hcl:"tls_server_name,optional"`
-	TLSSkipVerify bool   `hcl:"tls_skip_verify,optional"`
+	Name    string `hcl:"name,label"`
+	Address string `hcl:"address"`
+	Region  string `hcl:"region,optional"`
+	// Labels describe the cluster to ApplicationSets' clusters generators.
+	Labels        map[string]string `hcl:"labels,optional"`
+	Token         string            `hcl:"token,optional"`
+	TokenFile     string            `hcl:"token_file,optional"`
+	CACert        string            `hcl:"ca_cert,optional"`
+	ClientCert    string            `hcl:"client_cert,optional"`
+	ClientKey     string            `hcl:"client_key,optional"`
+	TLSServerName string            `hcl:"tls_server_name,optional"`
+	TLSSkipVerify bool              `hcl:"tls_skip_verify,optional"`
 }
 
 // ConsulConfig enables the Consul store, leader election and KV resources.

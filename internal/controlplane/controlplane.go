@@ -79,6 +79,7 @@ func New(ctx context.Context, cfg *config.Config, o Options) (*ControlPlane, err
 		return nil, err
 	}
 	clusters.Add(v1.InClusterName, in)
+	clusters.SetLabels(v1.InClusterName, cfg.Nomad.Labels)
 	for _, cl := range cfg.Clusters {
 		tok, err := config.Secret(cl.Token, cl.TokenFile)
 		if err != nil {
@@ -90,6 +91,7 @@ func New(ctx context.Context, cfg *config.Config, o Options) (*ControlPlane, err
 			return nil, fmt.Errorf("cluster %s: %w", cl.Name, err)
 		}
 		clusters.Add(cl.Name, c)
+		clusters.SetLabels(cl.Name, cl.Labels)
 	}
 
 	// Store and leader election: Consul when enabled, else a file in

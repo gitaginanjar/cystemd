@@ -377,10 +377,20 @@ func deref(s *string) string {
 type Clusters struct {
 	byName map[string]API
 	order  []string
+	labels map[string]map[string]string
 }
 
 // NewClusters returns an empty registry.
-func NewClusters() *Clusters { return &Clusters{byName: map[string]API{}} }
+func NewClusters() *Clusters {
+	return &Clusters{byName: map[string]API{}, labels: map[string]map[string]string{}}
+}
+
+// SetLabels describes a cluster (for ApplicationSets' clusters
+// generators).
+func (c *Clusters) SetLabels(name string, labels map[string]string) { c.labels[name] = labels }
+
+// Labels returns a cluster's labels.
+func (c *Clusters) Labels(name string) map[string]string { return c.labels[name] }
 
 // Add registers a cluster.
 func (c *Clusters) Add(name string, client API) {

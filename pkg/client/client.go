@@ -644,6 +644,26 @@ func (c *Client) RemoveRepository(ctx context.Context, repo string) error {
 	return c.do(ctx, http.MethodDelete, "/api/v1/repositories", url.Values{"repo": {repo}}, nil, nil)
 }
 
+// CreateRoleToken issues a token of a project role, which acts as the
+// role: an empty id is chosen by the server, expiresIn 0 never expires.
+func (c *Client) CreateRoleToken(ctx context.Context, project, role, id string, expiresIn time.Duration) (string, *v1.JWTToken, error) {
+	var out struct {
+		Secret string `json:"token"`
+		v1.JWTToken
+	}
+	body := map[string]any{"id": id, "expiresIn": int64(expiresIn / time.Second)}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/projects/"+esc(project)+"/roles/"+esc(role)+"/token", nil, body, &out); err != nil {
+		return "", nil, err
+	}
+	return out.Secret, &out.JWTToken, nil
+}
+
+// DeleteRoleToken revokes a project role's token, named by its ID or its
+// issue time (Unix seconds).
+func (c *Client) DeleteRoleToken(ctx context.Context, project, role, token string) error {
+	return c.do(ctx, http.MethodDelete, "/api/v1/projects/"+esc(project)+"/roles/"+esc(role)+"/token/"+esc(token), nil, nil, nil)
+}
+
 // Cluster is a destination Nomad cluster.
 type Cluster struct {
 	Name            string             `json:"name"`

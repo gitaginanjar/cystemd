@@ -77,7 +77,7 @@ func newHarnessOpts(t *testing.T, configure func(*config.Config), options func(*
 	repos := &controller.RepoService{Git: gitClient, Clusters: clusters}
 	o := server.Options{
 		Config: cfg, Store: st, Auth: am, RBAC: enforcer, Clusters: clusters, Git: gitClient, Repos: repos,
-		Live: &controller.Live{Clusters: clusters, Repos: repos}, Metrics: metrics.New(), Logger: logger,
+		Live: &controller.Live{Clusters: clusters, Repos: repos, Apps: st}, Metrics: metrics.New(), Logger: logger,
 		Build: server.BuildInfo{Version: "test", Mode: "standalone"},
 	}
 	if options != nil {

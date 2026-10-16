@@ -107,6 +107,11 @@ deployment health, Consul or Nomad service checks), queued placements, or
 for batch jobs the outcome of their runs ([internal/health](../internal/health)).
 The Application takes the worst health of its resources, hooks aside.
 
+**App of apps.** An Application whose source is `applications` declares
+Applications instead of jobs; it compares, creates, updates and prunes them
+like resources, tracking them by their label `cystemd.app`
+([ADR 0011](adr/0011-applications-declared-by-applications.md)).
+
 **Sync.** An operation runs the PreSync hooks, then resources in waves:
 Consul keys first (wave -1), then jobs by their meta `cystemd.sync-wave`
 (default 0), then pruning (always last, so `PruneLast=true` changes nothing).

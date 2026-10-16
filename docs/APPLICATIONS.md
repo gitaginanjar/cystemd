@@ -156,6 +156,50 @@ The generated job has one task, driven by the systemd driver in unit mode:
 [examples/gitops/apps/payments-api](../examples/gitops/apps/payments-api)
 shows a values file and the Application that uses it.
 
+### Applications (app of apps)
+
+As in Argo CD, an Application can declare other Applications: its path holds
+Application manifests, the same YAML `cystemd app create -f` reads. It
+creates them on sync, updates them, prunes those removed from Git, and its
+tree shows them with their health; editing one outside Git is undone by
+self-heal. One Application then bootstraps all the others, and the
+Applications themselves are in Git:
+
+```yaml
+apiVersion: cystemd.io/v1alpha1
+kind: Application
+metadata:
+  name: platform
+spec:
+  project: platform
+  source:
+    repoURL: https://git.example.com/platform/deploy.git
+    path: applications              # *.yaml and *.yml, each with Applications
+    applications:
+      files: ["*.yaml"]             # default *.yaml and *.yml
+      projects: [platform, payments]  # default: this Application's project
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+```
+
+- The declared Applications are tracked by their label `cystemd.app` (the
+  declaring Application's name), and may only belong to the projects
+  `applications.projects` lists. Setting that list takes the right to
+  create applications in each project.
+- Their spec is compared, and the labels, annotations and finalizers their
+  manifests set; other labels and annotations (say, a refresh request) are
+  left alone.
+- Their health is shown but is not the parent's: a degraded child does not
+  degrade the app of apps (Argo CD's behaviour since 1.8).
+- Pruning, and deleting the parent with cascade, delete the Applications
+  themselves; their own `resources-finalizer.cystemd.io` decides whether
+  their jobs and keys go too. Declare the finalizer in their manifests for
+  that.
+- An Application declared by another one, or one declaring its own
+  ancestor, is refused.
+
 ## Destinations
 
 `destination.name` is a cluster of the control plane: `in-cluster` (the Nomad

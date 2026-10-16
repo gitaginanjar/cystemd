@@ -518,3 +518,27 @@ func TestWebSyncWindows(t *testing.T) {
 		t.Fatalf("project after the form: %+v", got.Spec)
 	}
 }
+
+func TestWebAppOfApps(t *testing.T) {
+	h := newHarness(t)
+	child := demoApp("web")
+	if code := h.do("POST", "/api/v1/applications", h.admin, child, nil); code != 200 {
+		t.Fatalf("child: %d", code)
+	}
+	parent := demoApp("platform")
+	parent.Spec.Source.Applications = &v1.ApplicationsSource{}
+	if code := h.do("POST", "/api/v1/applications", h.admin, parent, nil); code != 200 {
+		t.Fatalf("parent: %d", code)
+	}
+	if _, err := h.store.MutateApplication(context.Background(), "platform", func(a *v1.Application) error {
+		a.Status.Resources = []v1.ResourceStatus{{Kind: v1.KindApplication, Name: "web", Status: v1.SyncStatusSynced,
+			Health: &v1.HealthStatus{Status: v1.HealthStatusHealthy}}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, body := h.web("GET", "/ui/applications/platform", h.admin, nil, false, "")
+	mustContain(t, body, `aria-label="Application web"`, "node=application%3Aweb")
+	_, body = h.web("GET", "/ui/applications/platform?node=application%3Aweb", h.admin, nil, true, "panel")
+	mustContain(t, body, "Open application", `href="/ui/applications/web"`, "Desired manifest", "Sync Application web only?")
+}

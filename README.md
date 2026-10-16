@@ -23,7 +23,8 @@ converts a v4 installation.
   repository: Nomad jobspecs (HCL2 with variables, or JSON) or a **systemd
   source**, a values file turned into a job for the built-in systemd task
   driver (package version, CPU and memory limits, configuration file, Vault
-  secrets). Applications can also own Consul keys.
+  secrets). Applications can also own Consul keys, and declare other
+  Applications (app of apps), so that the Applications are in Git too.
 - **Compare, diff, sync.** CYSTEMD renders the desired state, compares it with
   the live Nomad jobs and Consul keys, and reports `Synced` or `OutOfSync`
   with a diff and Nomad's own plan. A sync can be manual, partial, a dry run or

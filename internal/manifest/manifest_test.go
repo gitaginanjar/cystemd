@@ -57,7 +57,7 @@ spec:
 func TestExamples(t *testing.T) {
 	root := filepath.Join("..", "..", "examples", "gitops")
 	apps := map[string]*v1.Application{}
-	for _, f := range []string{"projects/platform.yaml", "applications/hello.yaml", "applications/payments-api.yaml"} {
+	for _, f := range []string{"projects/platform.yaml", "applications/hello.yaml", "applications/payments-api.yaml", "bootstrap.yaml"} {
 		objs, err := manifest.ReadFile(filepath.Join(root, f))
 		if err != nil {
 			t.Fatal(err)
@@ -87,6 +87,16 @@ func TestExamples(t *testing.T) {
 
 	ctx := context.Background()
 	r := &render.Renderer{Opts: render.Options{ConsulEnabled: true, VaultAddress: "https://vault.service.consul:8200"}}
+
+	// The app of apps declares the other two, in its own project.
+	declared, err := r.Render(ctx, apps["platform-apps"], filepath.Join(root, "applications"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(declared.Applications) != 2 || declared.Applications[0].Metadata.Name != "hello" ||
+		!apps["platform-apps"].Spec.Source.Applications.AllowsProject("platform", declared.Applications[1].Spec.Project) {
+		t.Fatalf("platform-apps declares %+v", declared.Applications)
+	}
 	m, err := r.Render(ctx, apps["payments-api"], filepath.Join(root, "apps", "payments-api"))
 	if err != nil {
 		t.Fatal(err)

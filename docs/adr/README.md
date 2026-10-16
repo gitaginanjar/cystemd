@@ -16,3 +16,4 @@ never by editing it.
 | [0008](0008-licensing-boundary.md) | Keep CYSTEMD's own binaries free of BUSL code | Accepted |
 | [0009](0009-resource-hooks-as-batch-jobs.md) | Resource hooks as batch jobs | Accepted |
 | [0010](0010-sso-through-nomad-oidc.md) | Single sign-on through Nomad's OIDC auth methods | Accepted |
+| [0011](0011-applications-declared-by-applications.md) | Applications declared by an Application (app of apps) | Accepted |

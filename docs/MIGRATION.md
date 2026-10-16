@@ -126,6 +126,11 @@ cystemd ctl login https://cystemd.example.com        # or cystemdctl login
 cystemd app create -f migration/applications.yaml
 ```
 
+Or keep them in Git, as v4 kept `config.yml`: commit `applications.yaml`
+under a directory of the GitOps repository and create one Application that
+declares them ([app of apps](APPLICATIONS.md#applications-app-of-apps));
+adding a service is then a commit, as it was in v4.
+
 Applications that were `autosync: true` in v4 are automated and sync at once.
 To look first, remove their `syncPolicy` from `applications.yaml` before
 creating them, then:

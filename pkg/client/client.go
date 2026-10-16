@@ -326,6 +326,60 @@ func (c *Client) DeleteApplication(ctx context.Context, name string, cascade boo
 	return c.do(ctx, http.MethodDelete, "/api/v1/applications/"+esc(name), q, nil, nil)
 }
 
+// ListApplicationSets lists the ApplicationSets the caller may see.
+func (c *Client) ListApplicationSets(ctx context.Context) ([]*v1.ApplicationSet, error) {
+	var out struct {
+		Items []*v1.ApplicationSet `json:"items"`
+	}
+	return out.Items, c.do(ctx, http.MethodGet, "/api/v1/applicationsets", nil, nil, &out)
+}
+
+// GetApplicationSet returns an ApplicationSet.
+func (c *Client) GetApplicationSet(ctx context.Context, name string) (*v1.ApplicationSet, error) {
+	var out v1.ApplicationSet
+	return &out, c.do(ctx, http.MethodGet, "/api/v1/applicationsets/"+esc(name), nil, nil, &out)
+}
+
+// CreateApplicationSet creates an ApplicationSet; with upsert it replaces
+// an existing one.
+func (c *Client) CreateApplicationSet(ctx context.Context, set *v1.ApplicationSet, upsert bool) (*v1.ApplicationSet, error) {
+	q := url.Values{}
+	if upsert {
+		q.Set("upsert", "true")
+	}
+	var out v1.ApplicationSet
+	return &out, c.do(ctx, http.MethodPost, "/api/v1/applicationsets", q, set, &out)
+}
+
+// UpdateApplicationSet replaces an ApplicationSet's spec (conditional on
+// its resourceVersion when set).
+func (c *Client) UpdateApplicationSet(ctx context.Context, set *v1.ApplicationSet) (*v1.ApplicationSet, error) {
+	var out v1.ApplicationSet
+	return &out, c.do(ctx, http.MethodPut, "/api/v1/applicationsets/"+esc(set.Metadata.Name), nil, set, &out)
+}
+
+// DeleteApplicationSet deletes an ApplicationSet; with cascade, its
+// Applications too.
+func (c *Client) DeleteApplicationSet(ctx context.Context, name string, cascade bool) error {
+	q := url.Values{"cascade": {strconv.FormatBool(cascade)}}
+	return c.do(ctx, http.MethodDelete, "/api/v1/applicationsets/"+esc(name), q, nil, nil)
+}
+
+// RefreshApplicationSet asks for an ApplicationSet's Applications to be
+// generated again now.
+func (c *Client) RefreshApplicationSet(ctx context.Context, name string) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/applicationsets/"+esc(name)+"/refresh", nil, map[string]any{}, nil)
+}
+
+// GenerateApplicationSet previews the Applications an ApplicationSet
+// generates, applying nothing.
+func (c *Client) GenerateApplicationSet(ctx context.Context, set *v1.ApplicationSet) ([]*v1.Application, error) {
+	var out struct {
+		Applications []*v1.Application `json:"applications"`
+	}
+	return out.Applications, c.do(ctx, http.MethodPost, "/api/v1/applicationsets/generate", nil, set, &out)
+}
+
 // SyncRequest is a sync (Argo CD's ApplicationSyncRequest).
 type SyncRequest struct {
 	Revision    string                     `json:"revision,omitempty"`

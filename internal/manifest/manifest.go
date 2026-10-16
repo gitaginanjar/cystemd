@@ -22,18 +22,21 @@ import (
 
 // Object is one decoded manifest.
 type Object struct {
-	Kind        string
-	Application *v1.Application
-	Project     *v1.AppProject
+	Kind           string
+	Application    *v1.Application
+	Project        *v1.AppProject
+	ApplicationSet *v1.ApplicationSet
 }
 
 // Name is the object's name.
 func (o Object) Name() string {
-	if o.Application != nil {
+	switch {
+	case o.Application != nil:
 		return o.Application.Metadata.Name
-	}
-	if o.Project != nil {
+	case o.Project != nil:
 		return o.Project.Metadata.Name
+	case o.ApplicationSet != nil:
+		return o.ApplicationSet.Metadata.Name
 	}
 	return ""
 }
@@ -123,10 +126,17 @@ func decodeDoc(doc *yaml.Node) (Object, error) {
 		}
 		p.APIVersion, p.Kind = v1.APIVersion, v1.KindAppProject
 		return Object{Kind: head.Kind, Project: &p}, nil
+	case v1.KindApplicationSet:
+		var s v1.ApplicationSet
+		if err := strict(&s); err != nil {
+			return Object{}, err
+		}
+		s.APIVersion, s.Kind = v1.APIVersion, v1.KindApplicationSet
+		return Object{Kind: head.Kind, ApplicationSet: &s}, nil
 	case "":
-		return Object{}, errors.New("kind is required (Application or AppProject)")
+		return Object{}, errors.New("kind is required (Application, AppProject or ApplicationSet)")
 	}
-	return Object{}, fmt.Errorf("kind %q: expected %s or %s", head.Kind, v1.KindApplication, v1.KindAppProject)
+	return Object{}, fmt.Errorf("kind %q: expected %s, %s or %s", head.Kind, v1.KindApplication, v1.KindAppProject, v1.KindApplicationSet)
 }
 
 // Encode writes objects as YAML documents.

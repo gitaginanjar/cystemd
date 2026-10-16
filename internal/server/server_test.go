@@ -65,8 +65,19 @@ func newHarnessOpts(t *testing.T, configure func(*config.Config), options func(*
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash, _ := auth.HashPassword("reader-password")
-	if err := st.PutAccount(ctx, &store.Account{Name: "reader", PasswordHash: hash, Enabled: true}); err != nil {
+	// The accounts declared by the configuration, and "reader".
+	declared := []auth.DeclaredAccount{{Name: "reader", Capabilities: []string{auth.CapabilityLogin}, Enabled: true}}
+	for _, a := range cfg.Auth.Accounts {
+		d := auth.DeclaredAccount{Name: a.Name, Capabilities: a.Capabilities, Enabled: a.Enabled == nil || *a.Enabled}
+		if len(d.Capabilities) == 0 {
+			d.Capabilities = []string{auth.CapabilityLogin}
+		}
+		declared = append(declared, d)
+	}
+	if err := am.SyncAccounts(ctx, declared); err != nil {
+		t.Fatal(err)
+	}
+	if err := am.SetPassword(ctx, "reader", "reader-password"); err != nil {
 		t.Fatal(err)
 	}
 	enforcer, _ := rbac.New("", rbac.RoleReadonly)

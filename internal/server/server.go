@@ -25,6 +25,7 @@ import (
 
 	consulapi "github.com/hashicorp/consul/api"
 
+	"github.com/gitaginanjar/cystemd/internal/appset"
 	"github.com/gitaginanjar/cystemd/internal/auth"
 	"github.com/gitaginanjar/cystemd/internal/config"
 	"github.com/gitaginanjar/cystemd/internal/controller"
@@ -66,6 +67,8 @@ type Options struct {
 	Build    BuildInfo
 	// SSO is single sign-on through Nomad (nil: not configured).
 	SSO SSO
+	// AppSets previews ApplicationSets' Applications (nil: no preview).
+	AppSets *appset.Generator
 }
 
 // Server serves the API and the web UI.

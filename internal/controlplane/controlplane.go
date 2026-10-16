@@ -20,6 +20,7 @@ import (
 	consulapi "github.com/hashicorp/consul/api"
 	nomadapi "github.com/hashicorp/nomad/api"
 
+	"github.com/gitaginanjar/cystemd/internal/appset"
 	"github.com/gitaginanjar/cystemd/internal/auth"
 	"github.com/gitaginanjar/cystemd/internal/config"
 	"github.com/gitaginanjar/cystemd/internal/controller"
@@ -201,10 +202,18 @@ func New(ctx context.Context, cfg *config.Config, o Options) (*ControlPlane, err
 	}
 
 	live := &controller.Live{Clusters: clusters, Consul: consulKV, Checks: checks, Repos: repos, Apps: cp.Store}
+	appsets := &appset.Generator{Repos: repos, Clusters: func() []appset.Cluster {
+		var out []appset.Cluster
+		for _, name := range clusters.Names() {
+			c, _ := clusters.Get(name)
+			out = append(out, appset.Cluster{Name: name, Server: c.Address(), Labels: clusters.Labels(name)})
+		}
+		return out
+	}}
 	if *cfg.Controller.Enabled {
 		cp.Controller = controller.New(controller.Options{
 			Store: cp.Store, Clusters: clusters, Repos: repos, Consul: consulKV, Checks: checks,
-			Logger: logger, Metrics: m,
+			Logger: logger, Metrics: m, AppSets: appsets,
 			Config: controller.Config{
 				ReconcileInterval: config.Duration(cfg.Controller.ReconcileInterval, 0),
 				SelfHealTimeout:   config.Duration(cfg.Controller.SelfHealTimeout, 0),
@@ -223,7 +232,7 @@ func New(ctx context.Context, cfg *config.Config, o Options) (*ControlPlane, err
 	cp.Server = server.New(server.Options{
 		Config: cfg, Store: cp.Store, Auth: am, RBAC: enforcer, Live: live, Repos: repos, Git: gitClient,
 		Clusters: clusters, Vault: vc, Consul: consulClient, Metrics: m, Elector: cp.Elector,
-		Logger: logger, Build: o.Build, SSO: sso,
+		Logger: logger, Build: o.Build, SSO: sso, AppSets: appsets,
 	})
 	return cp, nil
 }

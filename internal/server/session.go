@@ -105,12 +105,16 @@ type UserInfo struct {
 
 func (s *Server) userInfo(r *http.Request) UserInfo {
 	id := identity(r)
+	roles := s.RBAC.Roles(id.Username, id.Groups)
+	if g := s.grant(r.Context(), id); !g.Empty() {
+		roles = append(roles, g.Subjects...)
+	}
 	return UserInfo{
 		LoggedIn: id.Provider != auth.ProviderAnonymous,
 		Username: id.Username,
 		Provider: id.Provider,
 		Groups:   id.Groups,
-		Roles:    s.RBAC.Roles(id.Username, id.Groups),
+		Roles:    roles,
 		Iss:      "cystemd",
 		IsAdmin:  s.enforce(r, "accounts", "update", "*"),
 	}

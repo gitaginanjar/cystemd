@@ -105,6 +105,20 @@ func Commands(ui cli.Ui, o Options) map[string]cli.CommandFactory {
 			return &projWindowsManualCommand{meta: m(), enable: true}, nil
 		},
 		"proj windows disable-manual-sync": func() (cli.Command, error) { return &projWindowsManualCommand{meta: m()}, nil },
+		"proj role": func() (cli.Command, error) {
+			return &groupCommand{meta: m(), name: "proj role", synopsis: "Manage a project's roles and their tokens"}, nil
+		},
+		"proj role list":          func() (cli.Command, error) { return &projRoleListCommand{meta: m()}, nil },
+		"proj role get":           func() (cli.Command, error) { return &projRoleGetCommand{meta: m()}, nil },
+		"proj role create":        func() (cli.Command, error) { return &projRoleCreateCommand{meta: m()}, nil },
+		"proj role delete":        func() (cli.Command, error) { return &projRoleDeleteCommand{meta: m()}, nil },
+		"proj role add-policy":    func() (cli.Command, error) { return &projRolePolicyCommand{meta: m()}, nil },
+		"proj role remove-policy": func() (cli.Command, error) { return &projRolePolicyCommand{meta: m(), remove: true}, nil },
+		"proj role add-group":     func() (cli.Command, error) { return &projRoleGroupCommand{meta: m()}, nil },
+		"proj role remove-group":  func() (cli.Command, error) { return &projRoleGroupCommand{meta: m(), remove: true}, nil },
+		"proj role create-token":  func() (cli.Command, error) { return &projRoleCreateTokenCommand{meta: m()}, nil },
+		"proj role delete-token":  func() (cli.Command, error) { return &projRoleDeleteTokenCommand{meta: m()}, nil },
+		"proj role list-tokens":   func() (cli.Command, error) { return &projRoleListTokensCommand{meta: m()}, nil },
 
 		"repo": func() (cli.Command, error) {
 			return &groupCommand{meta: m(), name: "repo", synopsis: "Manage repository connections"}, nil

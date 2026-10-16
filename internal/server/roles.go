@@ -106,6 +106,30 @@ func (s *Server) projectChanged(name string) {
 	s.Auth.ForgetProject(name)
 }
 
+// editProject changes a project atomically, validating the result (needs
+// projects/update).
+func (s *Server) editProject(r *http.Request, name string, fn func(*v1.AppProject) error) (*v1.AppProject, error) {
+	if err := s.authorize(r, "projects", "update", name); err != nil {
+		return nil, err
+	}
+	p, err := s.Store.MutateProject(r.Context(), name, func(p *v1.AppProject) error {
+		if err := fn(p); err != nil {
+			return err
+		}
+		p.SetDefaults()
+		if err := p.Validate(); err != nil {
+			return badRequest("%v", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.projectChanged(name)
+	s.audit(r, "projects/update", name, "ALLOWED", "")
+	return p, nil
+}
+
 type roleTokenRequest struct {
 	// ID names the token (default: random).
 	ID string `json:"id"`

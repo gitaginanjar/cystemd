@@ -104,6 +104,22 @@ func ParseRolePolicy(line string) (RolePolicy, error) {
 	return RolePolicy{Subject: f[1], Resource: f[2], Action: f[3], Object: f[4], Allow: f[5] == "allow"}, nil
 }
 
+// NewRolePolicy is a role's policy on objects of its project: an object
+// without the "<project>/" prefix gets it ("api-*" is <project>/api-*).
+func NewRolePolicy(project, role, resource, action, object string, allow bool) RolePolicy {
+	if !strings.HasPrefix(object, project+"/") {
+		object = project + "/" + object
+	}
+	return RolePolicy{Subject: RoleSubject(project, role), Resource: resource, Action: action, Object: object, Allow: allow}
+}
+
+// SamePolicy compares two policy lines field by field.
+func SamePolicy(a, b string) bool {
+	pa, errA := ParseRolePolicy(a)
+	pb, errB := ParseRolePolicy(b)
+	return errA == nil && errB == nil && pa == pb
+}
+
 // String is the policy line.
 func (rp RolePolicy) String() string {
 	effect := "deny"

@@ -43,18 +43,7 @@ func rolePolicy(project, role, resource, action, object, permission string) (str
 	if !slices.Contains(v1.RoleResources, resource) {
 		return "", fmt.Errorf("-resource is %s, not %q", strings.Join(v1.RoleResources, " or "), resource)
 	}
-	if !strings.HasPrefix(object, project+"/") {
-		object = project + "/" + object
-	}
-	rp := v1.RolePolicy{Subject: v1.RoleSubject(project, role), Resource: resource, Action: action, Object: object, Allow: permission == "allow"}
-	return rp.String(), nil
-}
-
-// samePolicy compares policy lines field by field.
-func samePolicy(a, b string) bool {
-	pa, errA := v1.ParseRolePolicy(a)
-	pb, errB := v1.ParseRolePolicy(b)
-	return errA == nil && errB == nil && pa == pb
+	return v1.NewRolePolicy(project, role, resource, action, object, permission == "allow").String(), nil
 }
 
 type projRoleListCommand struct{ *meta }
@@ -326,7 +315,7 @@ func (c *projRolePolicyCommand) Run(args []string) int {
 		if err != nil {
 			return err
 		}
-		i := slices.IndexFunc(r.Policies, func(l string) bool { return samePolicy(l, line) })
+		i := slices.IndexFunc(r.Policies, func(l string) bool { return v1.SamePolicy(l, line) })
 		switch {
 		case c.remove && i < 0:
 			return fmt.Errorf("role %s has no policy %q", rest[1], line)

@@ -534,6 +534,62 @@ type ProjectPage struct {
 	Error     string
 }
 
+// ProjectHref is the page of a project.
+func ProjectHref(name string) string { return "/ui/settings/projects/" + url.PathEscape(name) }
+
+// RoleHref opens a project role's panel.
+func RoleHref(project, role string) string {
+	return ProjectHref(project) + "?panel=role&role=" + url.QueryEscape(role)
+}
+
+// RoleActionHref is where a project role's forms post.
+func RoleActionHref(project, role string) string {
+	return ProjectHref(project) + "/roles/" + url.PathEscape(role)
+}
+
+// RolePanel shows a project role, and edits it and its tokens.
+type RolePanel struct {
+	Project   string
+	Role      v1.ProjectRole
+	Tokens    []v1.JWTToken
+	CanUpdate bool
+	// NewToken is a token just created, shown this once.
+	NewToken, NewID string
+	Error           string
+	CloseHref       string
+}
+
+// Subject is the role's RBAC subject.
+func (p RolePanel) Subject() string { return v1.RoleSubject(p.Project, p.Role.Name) }
+
+// PolicyRows are the role's policies, parsed (unparsable lines as is).
+func (p RolePanel) PolicyRows() []PolicyRow {
+	var out []PolicyRow
+	for _, line := range p.Role.Policies {
+		row := PolicyRow{Line: line}
+		if rp, err := v1.ParseRolePolicy(line); err == nil {
+			row.Policy, row.Parsed = rp, true
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// PolicyRow is a role policy line.
+type PolicyRow struct {
+	Line   string
+	Policy v1.RolePolicy
+	Parsed bool
+}
+
+// NewRolePanel creates a project role.
+type NewRolePanel struct {
+	Project           string
+	Name, Description string
+	Error             string
+	CloseHref         string
+}
+
 // ClusterView describes a cluster.
 type ClusterView struct {
 	Name         string

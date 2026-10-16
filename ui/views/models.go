@@ -290,10 +290,12 @@ type AppForm struct {
 	SourceType      string // Nomad or Systemd
 	ResourceVersion string
 
-	NomadFiles    string
-	NomadVarFiles string
-	NomadVars     string // one k=v per line
-	NomadConsulKV string
+	NomadFiles           string
+	NomadVarFiles        string
+	NomadVars            string // one k=v per line
+	ApplicationsFiles    string
+	ApplicationsProjects string
+	NomadConsulKV        string
 
 	SystemdValuesFile      string
 	SystemdSelector        string

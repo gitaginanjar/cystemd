@@ -81,7 +81,7 @@ func appInSync(want, got *v1.Application) bool {
 		}
 	}
 	for k, v := range want.Metadata.Annotations {
-		if got.Metadata.Annotations[k] != v {
+		if k != RefreshAnnotation && got.Metadata.Annotations[k] != v {
 			return false
 		}
 	}
@@ -207,7 +207,11 @@ func (c *Controller) syncApp(ctx context.Context, app, want *v1.Application, dry
 			a.Metadata.Annotations = map[string]string{}
 		}
 		for k, v := range want.Metadata.Annotations {
-			a.Metadata.Annotations[k] = v
+			// A refresh request is the controller's to clear: declaring one
+			// would refresh the Application forever.
+			if k != RefreshAnnotation {
+				a.Metadata.Annotations[k] = v
+			}
 		}
 		for _, f := range want.Metadata.Finalizers {
 			if !a.Metadata.HasFinalizer(f) {

@@ -316,3 +316,18 @@ func TestProjectSyncWindows(t *testing.T) {
 	mustOK(t, ctl(t, "", "app", "get", "web"), "Sync window:    Denied")
 	mustFail(t, ctl(t, "", "app", "sync", "web", "-async"), "cannot sync: blocked by sync window")
 }
+
+func TestAppOfAppsFlags(t *testing.T) {
+	s := newAPIServer(t)
+	isolate(t)
+	login(t, s)
+	mustFail(t, ctl(t, "", "app", "create", "platform", "-repo", "https://127.0.0.1:1/ops.git", "-path", "applications",
+		"-applications", "-var", "x=1"), "cannot be combined")
+	mustOK(t, ctl(t, "", "app", "create", "platform", "-repo", "https://127.0.0.1:1/ops.git", "-path", "applications",
+		"-applications", "-applications-project", "default"), "created")
+	mustOK(t, ctl(t, "", "app", "get", "platform"), "Source type:    Applications")
+	r := ctl(t, "", "app", "get", "platform", "-o", "json")
+	mustOK(t, r, `"applications": {`, `"projects": [`)
+	mustOK(t, ctl(t, "", "app", "set", "platform", "-applications=false"), "updated")
+	mustOK(t, ctl(t, "", "app", "get", "platform"), "Source type:    Nomad")
+}

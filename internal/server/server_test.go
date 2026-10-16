@@ -429,3 +429,28 @@ func TestSyncWindows(t *testing.T) {
 		t.Fatalf("manual sync with manualSync: %d", code)
 	}
 }
+
+func TestAppOfAppsProjects(t *testing.T) {
+	h := newHarness(t)
+	parent := demoApp("platform")
+	parent.Spec.Source.Applications = &v1.ApplicationsSource{Projects: []string{"nowhere"}}
+	var e struct{ Message string }
+	if code := h.do("POST", "/api/v1/applications", h.admin, parent, &e); code != 400 || !strings.Contains(e.Message, `project "nowhere" does not exist`) {
+		t.Fatalf("unknown project: %d %+v", code, e)
+	}
+	parent.Spec.Source.Applications.Projects = []string{"default"}
+	parent.Spec.Source.Nomad = &v1.NomadSource{}
+	if code := h.do("POST", "/api/v1/applications", h.admin, parent, &e); code != 400 || !strings.Contains(e.Message, "only one of nomad, systemd and applications") {
+		t.Fatalf("two sources: %d %+v", code, e)
+	}
+	parent.Spec.Source.Nomad = nil
+	// Whoever may not create applications in a project may not let an app
+	// of apps declare them there.
+	if code := h.do("POST", "/api/v1/applications", h.reader, parent, nil); code != 403 {
+		t.Fatalf("reader: %d", code)
+	}
+	var created v1.Application
+	if code := h.do("POST", "/api/v1/applications", h.admin, parent, &created); code != 200 || created.Spec.Source.Type() != v1.SourceTypeApplications {
+		t.Fatalf("admin: %d %+v", code, created.Spec.Source)
+	}
+}

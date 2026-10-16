@@ -330,7 +330,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request, title, nav, headin
 		Crumbs:  crumbs,
 		User: views.User{
 			Name:    id.Username,
-			IsAdmin: s.RBAC.Enforce(id.Username, id.Groups, "accounts", "update", "*"),
+			IsAdmin: s.enforce(r, "accounts", "update", "*"),
 			Local:   id.Provider == auth.ProviderLocal,
 		},
 		Version: s.Build.Version,
@@ -387,8 +387,7 @@ func setFavorites(w http.ResponseWriter, favs map[string]bool) {
 
 // allowed checks a permission without auditing (for showing UI controls).
 func (s *Server) allowed(r *http.Request, resource, action, object string) bool {
-	id := identity(r)
-	return s.RBAC.Enforce(id.Username, id.Groups, resource, action, object)
+	return s.enforce(r, resource, action, object)
 }
 
 // formValues parses a form body (URL-encoded, bounded).

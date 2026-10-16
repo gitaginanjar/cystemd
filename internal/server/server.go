@@ -75,6 +75,7 @@ type Server struct {
 	creds    *Credentials
 	commits  commitCache
 	ssoCache ssoMethodCache
+	roles    projectRoles
 }
 
 // New returns a Server.
@@ -256,6 +257,8 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	s.route(mux, "GET /api/v1/projects/{name}", false, s.handleGetProject)
 	s.route(mux, "PUT /api/v1/projects/{name}", false, s.handleUpdateProject)
 	s.route(mux, "DELETE /api/v1/projects/{name}", false, s.handleDeleteProject)
+	s.route(mux, "POST /api/v1/projects/{name}/roles/{role}/token", false, s.handleCreateRoleToken)
+	s.route(mux, "DELETE /api/v1/projects/{name}/roles/{role}/token/{token}", false, s.handleDeleteRoleToken)
 
 	s.route(mux, "GET /api/v1/repositories", false, s.handleListRepos)
 	s.route(mux, "POST /api/v1/repositories", false, s.handleCreateRepo)
@@ -363,8 +366,7 @@ func decode(r *http.Request, v any) error {
 
 // authorize enforces RBAC for the caller and audits denials.
 func (s *Server) authorize(r *http.Request, resource, action, object string) error {
-	id := identity(r)
-	if s.RBAC.Enforce(id.Username, id.Groups, resource, action, object) {
+	if s.enforce(r, resource, action, object) {
 		return nil
 	}
 	s.audit(r, resource+"/"+action, object, "DENIED", "")

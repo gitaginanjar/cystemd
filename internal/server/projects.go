@@ -17,10 +17,9 @@ func (s *Server) listProjects(r *http.Request) ([]*v1.AppProject, error) {
 	if err != nil {
 		return nil, err
 	}
-	id := identity(r)
 	out := []*v1.AppProject{}
 	for _, p := range projects {
-		if s.RBAC.Enforce(id.Username, id.Groups, "projects", "get", p.Metadata.Name) {
+		if s.enforce(r, "projects", "get", p.Metadata.Name) {
 			out = append(out, p)
 		}
 	}
@@ -66,6 +65,7 @@ func (s *Server) createProject(r *http.Request, p *v1.AppProject) error {
 	if err := s.Store.PutProject(r.Context(), p); err != nil {
 		return err
 	}
+	s.projectChanged(p.Metadata.Name)
 	s.audit(r, "projects/create", p.Metadata.Name, "ALLOWED", "")
 	return nil
 }
@@ -93,6 +93,10 @@ func (s *Server) updateProject(r *http.Request, p *v1.AppProject) error {
 	}
 	if err := s.Store.PutProject(r.Context(), p); err != nil {
 		return err
+	}
+	s.projectChanged(p.Metadata.Name)
+	if stored, err := s.Store.GetProject(r.Context(), p.Metadata.Name); err == nil {
+		*p = *stored
 	}
 	s.audit(r, "projects/update", p.Metadata.Name, "ALLOWED", "")
 	return nil
@@ -136,6 +140,7 @@ func (s *Server) deleteProject(r *http.Request, name string) error {
 	if err := s.Store.DeleteProject(r.Context(), name); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err
 	}
+	s.projectChanged(name)
 	s.audit(r, "projects/delete", name, "ALLOWED", "")
 	return nil
 }

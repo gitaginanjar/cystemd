@@ -204,6 +204,7 @@ func (s *Server) webUpdateProject(w http.ResponseWriter, r *http.Request) {
 		if existing, err = s.getProject(r, name); err == nil {
 			proj.Spec.SyncWindows = existing.Spec.SyncWindows
 			proj.Spec.OrphanedResources = existing.Spec.OrphanedResources
+			proj.Spec.Roles = existing.Spec.Roles
 			err = s.updateProject(r, proj)
 		}
 	}
@@ -302,7 +303,7 @@ func (s *Server) webAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	crumbs := []views.Crumb{settingsCrumb, {Label: "Accounts", Href: "/ui/settings/accounts"}, {Label: name}}
-	if !s.RBAC.Enforce(identity(r).Username, identity(r).Groups, "accounts", "get", "*") {
+	if !s.allowed(r, "accounts", "get", "*") {
 		crumbs = []views.Crumb{{Label: "User info", Href: "/ui/user-info"}, {Label: name}}
 	}
 	p := views.AccountPage{

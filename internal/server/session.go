@@ -112,7 +112,7 @@ func (s *Server) userInfo(r *http.Request) UserInfo {
 		Groups:   id.Groups,
 		Roles:    s.RBAC.Roles(id.Username, id.Groups),
 		Iss:      "cystemd",
-		IsAdmin:  s.RBAC.Enforce(id.Username, id.Groups, "accounts", "update", "*"),
+		IsAdmin:  s.enforce(r, "accounts", "update", "*"),
 	}
 }
 
@@ -170,8 +170,7 @@ func (s *Server) accountAccess(r *http.Request, action, name string) error {
 // mayUpdateAccount is accountAccess(update) without the audit of a denial,
 // for showing controls.
 func (s *Server) mayUpdateAccount(r *http.Request, name string) bool {
-	id := identity(r)
-	return ownAccount(r, "update", name) || s.RBAC.Enforce(id.Username, id.Groups, "accounts", "update", name)
+	return ownAccount(r, "update", name) || s.enforce(r, "accounts", "update", name)
 }
 
 // getAccount describes a local account.
@@ -278,9 +277,8 @@ func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request) {
 // handleCanI tells the caller whether RBAC lets it perform an action
 // (Argo CD's account can-i).
 func (s *Server) handleCanI(w http.ResponseWriter, r *http.Request) {
-	id := identity(r)
 	value := "no"
-	if s.RBAC.Enforce(id.Username, id.Groups, r.PathValue("resource"), r.PathValue("action"), r.PathValue("object")) {
+	if s.enforce(r, r.PathValue("resource"), r.PathValue("action"), r.PathValue("object")) {
 		value = "yes"
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"value": value})

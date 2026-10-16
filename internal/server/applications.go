@@ -68,8 +68,7 @@ func listFilter(q url.Values) func(*v1.Application) bool {
 }
 
 func (s *Server) visible(r *http.Request, a *v1.Application) bool {
-	id := identity(r)
-	return s.RBAC.Enforce(id.Username, id.Groups, "applications", "get", appObject(a))
+	return s.enforce(r, "applications", "get", appObject(a))
 }
 
 // listApps returns the Applications the caller may see that match.

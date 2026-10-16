@@ -373,6 +373,59 @@ func TestProjectSyncWindows(t *testing.T) {
 	mustFail(t, ctl(t, "", "app", "sync", "web", "-async"), "cannot sync: blocked by sync window")
 }
 
+func TestProjectRoles(t *testing.T) {
+	s := newAPIServer(t)
+	isolate(t)
+	login(t, s)
+	mustOK(t, ctl(t, "", "app", "create", "web", "-repo", "https://127.0.0.1:1/ops.git", "-path", "apps/web"), "created")
+	mustOK(t, ctl(t, "", "app", "create", "db", "-repo", "https://127.0.0.1:1/ops.git", "-path", "apps/db"), "created")
+
+	mustFail(t, ctl(t, "", "proj", "role", "create", "default", "-ci"), `role name "-ci"`)
+	mustOK(t, ctl(t, "", "proj", "role", "create", "default", "ci", "-description", "GitLab"), "Role ci created in project default.")
+	mustFail(t, ctl(t, "", "proj", "role", "create", "default", "ci"), `already has a role "ci"`)
+	mustOK(t, ctl(t, "", "proj", "role", "add-policy", "default", "ci", "-action", "sync", "-object", "*"),
+		"Policy added: p, proj:default:ci, applications, sync, default/*, allow")
+	mustOK(t, ctl(t, "", "proj", "role", "add-policy", "default", "ci", "-action", "sync", "-object", "default/db", "-permission", "deny"), "default/db, deny")
+	mustFail(t, ctl(t, "", "proj", "role", "add-policy", "default", "ci", "-action", "update", "-object", "x", "-resource", "projects"), "-resource is applications or logs")
+	mustOK(t, ctl(t, "", "proj", "role", "add-group", "default", "ci", "team-payments"), "Group team-payments has role ci.")
+	mustOK(t, ctl(t, "", "proj", "role", "list", "default"), "ROLE  DESCRIPTION  POLICIES  GROUPS         TOKENS", "ci    GitLab       2         team-payments  0")
+
+	r := ctl(t, "", "proj", "role", "create-token", "default", "ci", "-id", "gitlab", "-expires-in", "30d")
+	mustOK(t, r, "Token created for proj:default:ci.", "ID:          gitlab", "Token:")
+	r = ctl(t, "", "proj", "role", "create-token", "default", "ci", "-token-only")
+	mustOK(t, r)
+	token := strings.TrimSpace(r.stdout)
+	if strings.Count(token, ".") != 2 {
+		t.Fatalf("token only: %q", r.stdout)
+	}
+	mustOK(t, ctl(t, "", "proj", "role", "get", "default", "ci"), "Subject:      proj:default:ci", "p, proj:default:ci, applications, sync, default/*, allow", "gitlab")
+	mustOK(t, ctl(t, "", "proj", "role", "get", "default", "ci", "-o", "json"), `"name": "ci"`, `"id": "gitlab"`)
+	mustOK(t, ctl(t, "", "proj", "role", "list-tokens", "default", "ci"), "TOKEN ID", "gitlab")
+
+	// The token acts as the role.
+	t.Setenv("CYSTEMD_ADDR", s.URL)
+	t.Setenv("CYSTEMD_TOKEN", token)
+	mustOK(t, ctl(t, "", "account", "get-user-info"), "Username:   proj:default:ci", "Provider:   project")
+	if r := ctl(t, "", "account", "can-i", "sync", "applications", "default/web"); r.stdout != "yes\n" {
+		t.Fatalf("can-i web: %q", r.all())
+	}
+	if r := ctl(t, "", "account", "can-i", "sync", "applications", "default/db"); r.stdout != "no\n" {
+		t.Fatalf("can-i db: %q", r.all())
+	}
+	mustFail(t, ctl(t, "", "proj", "role", "create-token", "default", "ci"), "permission denied")
+	t.Setenv("CYSTEMD_TOKEN", "")
+
+	mustFail(t, ctl(t, "", "proj", "role", "delete-token", "default", "ci", "nope"), `has no token "nope"`)
+	mustOK(t, ctl(t, "", "proj", "role", "delete-token", "default", "ci", "gitlab"), "Token gitlab of role proj:default:ci deleted.")
+	mustOK(t, ctl(t, "", "proj", "role", "remove-policy", "default", "ci", "-action", "sync", "-object", "db", "-permission", "deny"), "Policy removed")
+	mustFail(t, ctl(t, "", "proj", "role", "remove-policy", "default", "ci", "-action", "sync", "-object", "db", "-permission", "deny"), "has no policy")
+	mustOK(t, ctl(t, "", "proj", "role", "remove-group", "default", "ci", "team-payments"), "no longer has role ci")
+	mustOK(t, ctl(t, "", "proj", "role", "delete", "default", "ci"), "Role ci deleted from project default.")
+	mustFail(t, ctl(t, "", "proj", "role", "get", "default", "ci"), `project default has no role "ci"`)
+	t.Setenv("CYSTEMD_TOKEN", token)
+	mustFail(t, ctl(t, "", "account", "get-user-info"), "Log in with")
+}
+
 func TestAppOfAppsFlags(t *testing.T) {
 	s := newAPIServer(t)
 	isolate(t)

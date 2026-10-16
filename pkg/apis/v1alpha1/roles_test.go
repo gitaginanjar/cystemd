@@ -66,9 +66,9 @@ func TestProjectRolesValidation(t *testing.T) {
 		{Name: "-ci"},
 		{Name: "ci", Policies: []string{
 			"p, proj:billing:ci, applications, sync, payments/*, allow", // another subject
-			"p, proj:payments:ci, projects, update, payments, allow",   // not an application
-			"p, proj:payments:ci, applications, sync, */*, allow",      // another project's
-			"p, proj:payments:ci, applications, sync",                  // short
+			"p, proj:payments:ci, projects, update, payments, allow",    // not an application
+			"p, proj:payments:ci, applications, sync, */*, allow",       // another project's
+			"p, proj:payments:ci, applications, sync",                   // short
 		}, Groups: []string{"a,b", " "}},
 		{Name: "ci"},
 	}}}

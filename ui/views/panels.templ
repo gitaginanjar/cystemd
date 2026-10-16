@@ -321,7 +321,7 @@ templ AppFormFields(f AppForm, o FormOptions, isNew bool) {
 		<div class="form-grid">
 			<label class="field">
 				<span class="field__label">Application name</span>
-				<input class="input" name="name" value={ f.Name } required pattern="[a-z0-9]([-a-z0-9.]*[a-z0-9])?" maxlength="63" readonly?={ !isNew } autocomplete="off" placeholder="my-service"/>
+				<input class="input" name="name" value={ f.Name } required pattern="[a-z0-9]([\-a-z0-9.]*[a-z0-9])?" maxlength="63" readonly?={ !isNew } autocomplete="off" placeholder="my-service"/>
 			</label>
 			<label class="field">
 				<span class="field__label">Project name</span>

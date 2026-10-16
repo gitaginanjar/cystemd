@@ -486,7 +486,7 @@ templ ProjectPanelView(p ProjectPanel) {
 				<div class="form-grid">
 					<label class="field">
 						<span class="field__label">Project name</span>
-						<input class="input" name="name" value={ p.Form.Name } required readonly?={ !p.New } pattern="[a-z0-9]([-a-z0-9.]*[a-z0-9])?" autocomplete="off"/>
+						<input class="input" name="name" value={ p.Form.Name } required readonly?={ !p.New } pattern="[a-z0-9]([\-a-z0-9.]*[a-z0-9])?" autocomplete="off"/>
 					</label>
 					<label class="field field--wide">
 						<span class="field__label">Description</span>
@@ -523,7 +523,7 @@ templ NewRolePanelView(p NewRolePanel) {
 				<div class="form-grid">
 					<label class="field">
 						<span class="field__label">Role name</span>
-						<input class="input" name="name" value={ p.Name } required maxlength="63" pattern="[a-zA-Z0-9]([-_a-zA-Z0-9]*[a-zA-Z0-9])?" autocomplete="off"/>
+						<input class="input" name="name" value={ p.Name } required maxlength="63" pattern="[a-zA-Z0-9]([\-_a-zA-Z0-9]*[a-zA-Z0-9])?" autocomplete="off"/>
 						<span class="field__help">Its subject in RBAC is proj:{ p.Project }:&lt;name&gt;.</span>
 					</label>
 					<label class="field field--wide">

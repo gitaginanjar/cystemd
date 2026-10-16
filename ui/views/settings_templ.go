@@ -1844,7 +1844,7 @@ func ProjectPanelView(p ProjectPanel) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, " pattern=\"[a-z0-9]([-a-z0-9.]*[a-z0-9])?\" autocomplete=\"off\"></label> <label class=\"field field--wide\"><span class=\"field__label\">Description</span> <input class=\"input\" name=\"description\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, " pattern=\"[a-z0-9]([\\-a-z0-9.]*[a-z0-9])?\" autocomplete=\"off\"></label> <label class=\"field field--wide\"><span class=\"field__label\">Description</span> <input class=\"input\" name=\"description\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1976,7 +1976,7 @@ func NewRolePanelView(p NewRolePanel) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "\" required maxlength=\"63\" pattern=\"[a-zA-Z0-9]([-_a-zA-Z0-9]*[a-zA-Z0-9])?\" autocomplete=\"off\"> <span class=\"field__help\">Its subject in RBAC is proj:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "\" required maxlength=\"63\" pattern=\"[a-zA-Z0-9]([\\-_a-zA-Z0-9]*[a-zA-Z0-9])?\" autocomplete=\"off\"> <span class=\"field__help\">Its subject in RBAC is proj:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

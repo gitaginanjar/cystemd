@@ -40,9 +40,10 @@ converts a v4 installation.
   services, allocations and tasks, with logs, events, live manifests and
   actions (restart, stop, signal, promote, …), updated as it changes.
 - **Projects, RBAC, accounts and SSO.** AppProjects restrict sources and
-  destinations; an Argo CD-format RBAC policy decides who may do what; users
-  log in with a local account, a Nomad ACL token, or single sign-on through
-  Nomad's OIDC auth methods; pipelines use API tokens of `apiKey` accounts.
+  destinations; an Argo CD-format RBAC policy decides who may do what, and
+  project roles delegate a project's applications to groups and project
+  tokens; users log in with a local account, a Nomad ACL token, or single
+  sign-on through Nomad's OIDC auth methods; pipelines use API tokens.
 - **Git webhooks** from GitHub, GitLab, Gitea, Gogs and Bitbucket make the
   comparison immediate.
 

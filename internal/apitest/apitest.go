@@ -37,19 +37,33 @@ type Server struct {
 }
 
 // New starts an API server, stopped when the test ends.
-func New(t testing.TB) *Server {
+func New(t testing.TB) *Server { return NewWith(t, nil) }
+
+// NewWith lets configure change the configuration first: its accounts
+// (with their capabilities given) are declared, its RBAC policy applies.
+func NewWith(t testing.TB, configure func(*config.Config)) *Server {
 	t.Helper()
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
 	cfg.Nomad.Address = "http://127.0.0.1:1"
+	if configure != nil {
+		configure(cfg)
+	}
 	st := store.New(store.NewMemoryKV(), "cystemd")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	am, err := auth.NewManager(ctx, auth.Options{Store: st, AdminEnabled: true, DataDir: cfg.DataDir, Logger: logger})
 	if err != nil {
 		t.Fatal(err)
 	}
-	enforcer, err := rbac.New("", rbac.RoleReadonly)
+	var declared []auth.DeclaredAccount
+	for _, a := range cfg.Auth.Accounts {
+		declared = append(declared, auth.DeclaredAccount{Name: a.Name, Capabilities: a.Capabilities, Enabled: a.Enabled == nil || *a.Enabled})
+	}
+	if err := am.SyncAccounts(ctx, declared); err != nil {
+		t.Fatal(err)
+	}
+	enforcer, err := rbac.New(cfg.RBAC.Policy, rbac.RoleReadonly)
 	if err != nil {
 		t.Fatal(err)
 	}

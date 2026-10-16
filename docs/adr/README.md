@@ -18,3 +18,4 @@ never by editing it.
 | [0010](0010-sso-through-nomad-oidc.md) | Single sign-on through Nomad's OIDC auth methods | Accepted |
 | [0011](0011-applications-declared-by-applications.md) | Applications declared by an Application (app of apps) | Accepted |
 | [0012](0012-local-accounts-and-api-tokens.md) | Local accounts and API tokens declared in the configuration | Accepted |
+| [0013](0013-project-roles.md) | Project roles and project tokens | Accepted |

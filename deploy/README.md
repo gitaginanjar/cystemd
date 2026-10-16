@@ -183,6 +183,16 @@ The login page then offers **Log in via SSO** (one button per auth method
 when there are several), and `cystemdctl login -sso` does the same from a
 terminal. A user whose claims match no binding rule gets no session.
 
+A team's permissions can also live with its project instead of the global
+policy: a project role listing the group grants on the project's
+Applications only ([APPLICATIONS.md](../docs/APPLICATIONS.md#roles)):
+
+```sh
+cystemdctl proj role create payments deployers
+cystemdctl proj role add-policy payments deployers -action sync -object '*'
+cystemdctl proj role add-group payments deployers nomad:role:payments
+```
+
 ## Local accounts and API tokens
 
 Besides the admin, local accounts are declared in the control plane

@@ -380,7 +380,7 @@ func TestProjectRoles(t *testing.T) {
 	mustOK(t, ctl(t, "", "app", "create", "web", "-repo", "https://127.0.0.1:1/ops.git", "-path", "apps/web"), "created")
 	mustOK(t, ctl(t, "", "app", "create", "db", "-repo", "https://127.0.0.1:1/ops.git", "-path", "apps/db"), "created")
 
-	mustFail(t, ctl(t, "", "proj", "role", "create", "default", "-ci"), `role name "-ci"`)
+	mustFail(t, ctl(t, "", "proj", "role", "create", "default", "ci_"), `role name "ci_"`)
 	mustOK(t, ctl(t, "", "proj", "role", "create", "default", "ci", "-description", "GitLab"), "Role ci created in project default.")
 	mustFail(t, ctl(t, "", "proj", "role", "create", "default", "ci"), `already has a role "ci"`)
 	mustOK(t, ctl(t, "", "proj", "role", "add-policy", "default", "ci", "-action", "sync", "-object", "*"),

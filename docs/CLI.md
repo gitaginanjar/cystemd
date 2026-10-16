@@ -76,6 +76,12 @@ cystemdctl logout                                     # forget the session
 | `proj windows list <proj>` | Its sync windows, with IDs and whether they are active |
 | `proj windows add <proj>` | Add one (`-kind allow\|deny`, `-schedule`, `-duration`, `-applications`, `-namespaces`, `-clusters`, `-and-operator`, `-manual-sync`, `-time-zone`) |
 | `proj windows delete <proj> <id>`, `enable-manual-sync`, `disable-manual-sync` | Remove one, or let manual syncs through it |
+| `proj role list <proj>`, `get <proj> <role>` | A project's roles; a role's policies, groups and token IDs |
+| `proj role create <proj> <role>`, `delete` | Add a role (`-description`), or remove it and its tokens |
+| `proj role add-policy <proj> <role>`, `remove-policy` | `-action sync -object 'api-*'` (within the project; `-permission deny`, `-resource logs`) |
+| `proj role add-group <proj> <role> <group>`, `remove-group` | Give the role to a group (e.g. `nomad:role:payments`) |
+| `proj role create-token <proj> <role>` | A token acting as the role, shown once (`-expires-in`, `-id`, `-token-only`) |
+| `proj role list-tokens <proj> <role>`, `delete-token <proj> <role> <id\|iat>` | Its tokens; revoke one |
 | `repo list`, `repo add <url>`, `repo rm <url>` | Repository connections (`-username`, `-password` (`-` prompts), `-ssh-private-key-path`, `-insecure`, `-force`) |
 | `cluster list` | Destination clusters, their version and nodes |
 | `account get-user-info` | Who you are, your groups and roles |
@@ -124,6 +130,10 @@ cystemdctl account generate-token -account ci -id gitlab -expires-in 90d   # pri
 cystemdctl account get -account ci                                         # the token IDs
 cystemdctl account delete-token -account ci gitlab                         # revoked at once
 ```
+
+For automation confined to one project, a project role's token does the
+same without an account (`proj role create-token`, see
+[APPLICATIONS.md](APPLICATIONS.md#roles)).
 
 The token is a bearer token: `CYSTEMD_TOKEN`, `-token`, or an
 `Authorization: Bearer` header on the API. It acts as the account, with the

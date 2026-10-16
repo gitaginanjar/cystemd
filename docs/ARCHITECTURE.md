@@ -182,7 +182,10 @@ agent, the UI replaces Nomad's under `/ui/` and Nomad's own CSP applies.
   so deleting one revokes it ([ADR 0012](adr/0012-local-accounts-and-api-tokens.md)).
   During a v4 migration, v4's Ed25519 JWTs can be accepted as `role:admin`.
 - **Authorization** is an Argo CD RBAC policy: `role:admin`, `role:readonly`
-  and your own roles, matched against `<project>/<application>`.
+  and your own roles, matched against `<project>/<application>`. Projects add
+  roles of their own, whose policies can only grant on the project's
+  Applications; their groups' members and their tokens' holders have them
+  ([ADR 0013](adr/0013-project-roles.md)).
 - **The browser.** Session cookies are `HttpOnly` and `SameSite=Lax`;
   state-changing UI requests must be htmx requests from the same origin, and
   API writes with a cookie must be JSON. A strict CSP applies.

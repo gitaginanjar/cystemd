@@ -465,6 +465,42 @@ status (Allowed, Denied or Manual only) and the active windows; the
 project's page lists its windows. `cystemd proj windows` manages them, and
 `GET /api/v1/applications/<name>/syncwindows` returns an Application's.
 
+### Roles
+
+As in Argo CD, a project's roles grant permissions on its own Applications,
+on top of the RBAC policy, to groups and to the holders of project tokens:
+
+```yaml
+spec:
+  roles:
+    - name: ci
+      description: GitLab deploys the payment services
+      policies:                   # the role's subject: proj:<project>:<role>
+        - p, proj:payments:ci, applications, sync, payments/*, allow
+        - p, proj:payments:ci, applications, sync, payments/ledger, deny
+      groups:                     # members have the role
+        - nomad:role:payments     # an SSO user's (or Nomad token's) role
+```
+
+A policy's subject is the role's, its resource `applications` or `logs`, its
+object one of the project's Applications (`<project>/<glob>`): a role cannot
+grant on anything else. The members of its groups (SSO and Nomad token
+groups such as `nomad:role:<name>`, or a local account's groups) have the
+role, as do the holders of its tokens:
+
+```sh
+cystemd proj role create-token payments ci -id gitlab -expires-in 90d
+```
+
+A token acts as `proj:payments:ci`: the role's policies plus the default
+role, nothing else; it cannot create tokens. It works until deleted
+(`proj role delete-token payments ci gitlab`, or by its issue time, as Argo
+CD lists them), until it expires, or until its role goes. Tokens are recorded
+in the project's status (`status.jwtTokensByRole`), which applying the
+project again leaves alone. `cystemd proj role` manages roles, policies,
+groups and tokens; so does the role's panel on the project's page, where a
+new token is shown once.
+
 ## Repositories
 
 Public repositories need nothing. Private ones are connected in the UI

@@ -39,6 +39,8 @@ type harness struct {
 	store  *store.Store
 	admin  string // admin bearer token
 	reader string // readonly bearer token
+	// adminPassword is the admin's password.
+	adminPassword string
 }
 
 func newHarness(t *testing.T) *harness { return newHarnessWith(t, nil) }
@@ -80,7 +82,10 @@ func newHarnessOpts(t *testing.T, configure func(*config.Config), options func(*
 	if err := am.SetPassword(ctx, "reader", "reader-password"); err != nil {
 		t.Fatal(err)
 	}
-	enforcer, _ := rbac.New("", rbac.RoleReadonly)
+	enforcer, err := rbac.New(cfg.RBAC.Policy, rbac.RoleReadonly)
+	if err != nil {
+		t.Fatal(err)
+	}
 	clusters := nomad.NewClusters()
 	nc, _ := nomad.New(nomad.Config{Address: cfg.Nomad.Address})
 	clusters.Add(v1.InClusterName, nc)
@@ -98,7 +103,8 @@ func newHarnessOpts(t *testing.T, configure func(*config.Config), options func(*
 	h := &harness{t: t, srv: httptest.NewServer(s.Handler()), store: st}
 	t.Cleanup(h.srv.Close)
 	pw, _ := os.ReadFile(filepath.Join(cfg.DataDir, "initial-admin-password"))
-	h.admin = h.login("admin", strings.TrimSpace(string(pw)))
+	h.adminPassword = strings.TrimSpace(string(pw))
+	h.admin = h.login("admin", h.adminPassword)
 	h.reader = h.login("reader", "reader-password")
 	return h
 }

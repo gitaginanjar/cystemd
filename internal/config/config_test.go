@@ -4,6 +4,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -77,9 +78,43 @@ func TestParseRejects(t *testing.T) {
 		"duplicate cluster": "cluster \"a\" {\n address = \"x\"\n}\ncluster \"a\" {\n address = \"y\"\n}",
 		"reserved cluster":  "cluster \"in-cluster\" {\n address = \"x\"\n}",
 		"half tls":          `tls_cert_file = "/x"`,
+		"bad account name":  "auth {\n account \"ci/x\" {}\n}",
+		"duplicate account": "auth {\n account \"ci\" {}\n account \"ci\" {}\n}",
+		"bad capability":    "auth {\n account \"ci\" {\n capabilities = [\"apikey\"]\n }\n}",
+		"disabled admin":    "auth {\n account \"admin\" {\n enabled = false\n }\n}",
 	} {
 		if _, err := Parse([]byte(src), "x.hcl"); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestAccounts(t *testing.T) {
+	c, err := Parse([]byte(`
+auth {
+  account "alice" {}
+  account "ci" {
+    capabilities = ["apiKey"]
+  }
+  account "old.bot@example" {
+    capabilities = ["login", "apiKey"]
+    enabled      = false
+  }
+  account "admin" {
+    capabilities = ["login", "apiKey"]
+  }
+}
+`), "x.hcl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"alice": "login true", "ci": "apiKey true", "old.bot@example": "login,apiKey false", "admin": "login,apiKey true"}
+	if len(c.Auth.Accounts) != len(want) {
+		t.Fatalf("accounts = %+v", c.Auth.Accounts)
+	}
+	for _, a := range c.Auth.Accounts {
+		if got := strings.Join(a.Capabilities, ",") + " " + fmt.Sprint(*a.Enabled); got != want[a.Name] {
+			t.Errorf("%s: %s", a.Name, got)
 		}
 	}
 }

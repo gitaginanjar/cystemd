@@ -1,0 +1,19 @@
+CYSTEMD fork: print the distribution product line in `version` output.
+
+Nomad's Version is deliberately unchanged: servers and clients gate features
+on it, so the fork stays wire-compatible with upstream Nomad.
+---
+--- a/version/version.go
++++ b/version/version.go
+@@ -97,6 +97,11 @@
+ func (v *VersionInfo) FullVersionNumber(rev bool) string {
+ 	var versionString bytes.Buffer
+ 
++	// CYSTEMD fork: distributions print their own product line first.
++	if ProductName != "" {
++		fmt.Fprintf(&versionString, "%s %s\n", ProductName, ProductVersion)
++	}
++
+ 	fmt.Fprintf(&versionString, "Nomad v%s", v.Version)
+ 	if v.VersionPrerelease != "" {
+ 		fmt.Fprintf(&versionString, "-%s", v.VersionPrerelease)

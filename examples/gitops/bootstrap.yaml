@@ -1,0 +1,20 @@
+# The Application that declares all the others (app of apps): create it
+# once, and the Applications under applications/ follow Git from then on.
+apiVersion: cystemd.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-apps
+spec:
+  project: platform
+  source:
+    repoURL: https://git.example.com/platform/deploy.git
+    targetRevision: main
+    path: applications
+    applications: {}
+  destination:
+    name: in-cluster
+    namespace: platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

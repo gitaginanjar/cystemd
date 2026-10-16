@@ -1,0 +1,37 @@
+CYSTEMD fork: agent `cystemd { control_plane { ... } }` configuration block.
+
+Adds Config.Cystemd (type declared in overlay command/agent/cystemd_hooks.go)
+and merges/copies it like every other agent block.
+---
+--- a/command/agent/config.go
++++ b/command/agent/config.go
+@@ -152,6 +152,9 @@
+ 	// UI is used to configure the web UI
+ 	UI *config.UIConfig `hcl:"ui"`
+ 
++	// Cystemd configures the CYSTEMD fork extensions (control plane, UI).
++	Cystemd *CystemdConfig `hcl:"cystemd"`
++
+ 	// NomadConfig is used to override the default config.
+ 	// This is largely used for testing purposes.
+ 	NomadConfig *nomad.Config `hcl:"-" json:"-"`
+@@ -2142,6 +2145,11 @@
+ 		result.UI = result.UI.Merge(b.UI)
+ 	}
+ 
++	// Apply the CYSTEMD configuration
++	if b.Cystemd != nil {
++		result.Cystemd = result.Cystemd.Merge(b.Cystemd)
++	}
++
+ 	// Apply the sentinel config
+ 	if result.Sentinel == nil && b.Sentinel != nil {
+ 		server := *b.Sentinel
+@@ -2345,6 +2353,7 @@
+ 	nc.Consuls = helper.CopySlice(c.Consuls)
+ 	nc.Vaults = helper.CopySlice(c.Vaults)
+ 	nc.UI = c.UI.Copy()
++	nc.Cystemd = c.Cystemd.Copy()
+ 
+ 	nc.NomadConfig = c.NomadConfig.Copy()
+ 	nc.ClientConfig = c.ClientConfig.Copy()

@@ -1,0 +1,35 @@
+apiVersion: cystemd.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+spec:
+  description: Platform services
+  sourceRepos:
+    - https://git.example.com/platform/*
+  destinations:
+    - name: in-cluster
+      namespace: platform
+  # No automated syncs over the weekend; people may still sync by hand.
+  syncWindows:
+    - kind: deny
+      schedule: "0 18 * * 5"
+      duration: 62h
+      timeZone: Europe/Amsterdam
+      applications: ["*"]
+      manualSync: true
+      description: Weekend freeze
+  # The platform team syncs its services (members of the Nomad role the
+  # SSO binding rule gives them); CI gets tokens of the ci role
+  # (cystemd proj role create-token platform ci).
+  roles:
+    - name: deployers
+      description: Platform team
+      policies:
+        - p, proj:platform:deployers, applications, *, platform/*, allow
+        - p, proj:platform:deployers, logs, get, platform/*, allow
+      groups:
+        - nomad:role:platform
+    - name: ci
+      description: CI pipelines
+      policies:
+        - p, proj:platform:ci, applications, sync, platform/*, allow

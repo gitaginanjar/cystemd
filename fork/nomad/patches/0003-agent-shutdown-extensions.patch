@@ -1,0 +1,14 @@
+CYSTEMD fork: shut down registered HTTP extensions with the agent.
+---
+--- a/command/agent/agent.go
++++ b/command/agent/agent.go
+@@ -1545,6 +1545,9 @@
+ 		a.logger.Error("shutting down Consul client failed", "error", err)
+ 	}
+ 
++	// CYSTEMD fork: stop the registered HTTP extensions (control plane).
++	shutdownHTTPExtensions()
++
+ 	a.logger.Info("shutdown complete")
+ 	a.shutdown = true
+ 	close(a.shutdownCh)

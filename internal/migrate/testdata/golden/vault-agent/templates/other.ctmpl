@@ -1,0 +1,2 @@
+second = {{ $cystemd_s1 := secret "secret/data/myproject/app" }}{{ if $cystemd_s1 }}{{ $cystemd_s1.Data.data.db_user }}{{ end }}
+dynamic = {{ $p := "secret/myproject/app" }}{{ secret $p }}

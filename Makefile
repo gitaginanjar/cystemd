@@ -1,57 +1,109 @@
-# Makefile for cystemd
+# Makefile for CYSTEMD.
+#
+#   make              cystemd-server (standalone control plane + web UI)
+#                     and cystemdctl (the command line client)
+#   make agent        the cystemd agent: the Nomad fork with the control
+#                     plane, web UI and systemd driver built in
+#   make driver       the systemd driver as an external Nomad plugin
+#   make test         unit tests (no agents needed)
+#   make test-e2e     end-to-end tests: real Consul, Nomad and Vault, the
+#                     agent binary and a browser (see e2e/doc.go)
+#   make generate     regenerate the templ views (ui/views/*_templ.go)
+#
+# See docs/FORK.md for how the Nomad fork is assembled.
 
-BINARY_NAME := cystemd
-INSTALL_DIR := ${PWD}
-BIN_DIR := $(INSTALL_DIR)
-CONFIG_FILE := $(INSTALL_DIR)/config.yml
-ENV_FILE := $(INSTALL_DIR)/.env
-
-# Go toolchain. Resolved from PATH by default; override with GO=<path>
-# or export GO=<path> before invoking make.
 GO ?= go
 
-# Full 40-character Git commit hash, never the short hash.
-# The --version output advertises the binary's provenance; the full hash
-# makes it unambiguous which revision a customer is actually running.
+# Build metadata (the v4 contract): the version is the exact Git tag of
+# HEAD (empty when untagged), the commit is the full 40-character hash and
+# the build time is ISO 8601 in Asia/Jakarta time with an explicit offset.
 GIT_COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
-
-# Build timestamp in 24-hour Asia/Jakarta time, ISO 8601 with an explicit
-# numeric offset, for example: 2026-05-18T19:49:22+0700.
+GIT_TAG    := $(shell git describe --tags --exact-match HEAD 2>/dev/null || true)
 BUILD_TIME := $(shell TZ=Asia/Jakarta date +%Y-%m-%dT%H:%M:%S%z)
 
-# Populate the version only when HEAD points exactly to a Git tag.
-# If the current commit has no tag, the version is an empty string.
-GIT_TAG := $(shell git describe --tags --exact-match HEAD 2>/dev/null || true)
+BUILDINFO := github.com/gitaginanjar/cystemd/internal/buildinfo
+LDFLAGS := -s -w \
+	-X $(BUILDINFO).version=$(GIT_TAG) \
+	-X $(BUILDINFO).commit=$(GIT_COMMIT) \
+	-X $(BUILDINFO).buildTime=$(BUILD_TIME)
+AGENT_VERSION := $(if $(GIT_TAG),$(GIT_TAG),dev)
+AGENT_LDFLAGS := $(LDFLAGS) \
+	-X main.cystemdVersion=$(AGENT_VERSION) \
+	-X main.cystemdCommit=$(shell echo $(GIT_COMMIT) | cut -c1-12)
 
-.PHONY: all build install clean run
+TEMPL_VERSION := v0.3.1020
+BIN := bin
 
-# Default target
-all: build
+.PHONY: all build server ctl agent fork driver generate check-generate vendor-htmx \
+	test test-race test-integration test-e2e lint fmt clean help
 
-# Build the Go binary
-build:
-	@echo "Building $(BINARY_NAME)..."
-	mkdir -p $(BIN_DIR)
-	$(GO) version
-	$(GO) mod tidy
-	rm -f $(BIN_DIR)/$(BINARY_NAME)
-	CGO_ENABLED=0 $(GO) build -ldflags "-X cystemd/internal/service.version=$(GIT_TAG) -X cystemd/internal/service.commit=$(GIT_COMMIT) -X cystemd/internal/service.buildTime=$(BUILD_TIME)" -o $(BIN_DIR)/$(BINARY_NAME) ./main.go
+all: server ctl
 
-# Install the binary and configuration into INSTALL_DIR
-install: build
-	@echo "Installing to $(INSTALL_DIR)..."
-	mkdir -p $(BIN_DIR)
-	cp $(BIN_DIR)/$(BINARY_NAME) $(BIN_DIR)/
-	@echo "Binary installed at $(BIN_DIR)/$(BINARY_NAME)"
-	@echo "Config expected at $(CONFIG_FILE)"
-	@echo "Env file expected at $(ENV_FILE)"
+build: server ctl
 
-# Clean build artifacts
+## server: build bin/cystemd-server
+server:
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN)/cystemd-server ./cmd/cystemd-server
+
+## ctl: build bin/cystemdctl, the command line client (also in the agent: cystemd app ...)
+ctl:
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN)/cystemdctl ./cmd/cystemdctl
+
+## fork: assemble the Nomad fork into build/nomad (pinned upstream + overlay + patches)
+fork:
+	scripts/fork-assemble.sh
+
+## agent: build bin/cystemd, the Nomad fork with CYSTEMD built in
+agent: fork
+	cd agent && CGO_ENABLED=1 $(GO) build -trimpath -tags release -ldflags "$(AGENT_LDFLAGS)" -o ../$(BIN)/cystemd .
+
+## driver: build the systemd driver as an external plugin
+driver: fork
+	cd driver && CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w" -o ../$(BIN)/cystemd-driver-systemd ./cmd/cystemd-driver-systemd
+
+## generate: regenerate the templ views
+generate:
+	$(GO) run github.com/a-h/templ/cmd/templ@$(TEMPL_VERSION) generate -path ui/views
+
+## check-generate: fail when the generated views are out of date
+check-generate: generate
+	git diff --exit-code -- ui/views
+
+## vendor-htmx: re-vendor htmx (versions and checksums in the script)
+vendor-htmx:
+	scripts/vendor-htmx.sh
+
+## test: unit tests of every module that needs no running agents
+test:
+	$(GO) test -short ./...
+	cd driver && $(GO) test ./...
+
+## test-race: unit tests with the race detector
+test-race:
+	$(GO) test -short -race ./...
+
+## test-integration: every test of the main module, including those against real Nomad, Consul and Vault binaries on PATH (each skips without them)
+test-integration:
+	$(GO) test -count=1 ./...
+
+## test-e2e: end-to-end tests (consul, nomad and vault on PATH; bin/cystemd; Chromium)
+test-e2e:
+	cd e2e && $(GO) test -count=1 -timeout 30m ./...
+
+## lint: formatting and vet
+lint:
+	@test -z "$$(gofmt -l cmd internal pkg ui agent driver e2e)" || { gofmt -l cmd internal pkg ui agent driver e2e; exit 1; }
+	$(GO) vet ./...
+	cd e2e && $(GO) vet ./...
+
+## fmt: format the Go sources
+fmt:
+	gofmt -w cmd internal pkg ui agent driver
+
+## clean: remove build outputs (keeps the downloaded Go modules)
 clean:
-	@echo "Cleaning build artifacts..."
-	rm -f $(BIN_DIR)/$(BINARY_NAME)
+	rm -rf $(BIN) build
 
-# Run the API server directly
-run:
-	@echo "Running $(BINARY_NAME)..."
-	$(BIN_DIR)/$(BINARY_NAME)
+## help: list the targets
+help:
+	@sed -n 's/^## //p' $(MAKEFILE_LIST)

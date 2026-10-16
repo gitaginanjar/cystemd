@@ -1,0 +1,8 @@
+# Rendered by CYSTEMD v4 from Vault.
+db_user = {{ $cystemd_s1 := secret "secret/data/myproject/app" }}{{ if $cystemd_s1 }}{{ $cystemd_s1.Data.data.db_user }}{{ end }}
+db_password = {{ $cystemd_s2 := secret "secret/data/myproject/app" }}{{ if $cystemd_s2 }}{{ $cystemd_s2.Data.data.db_password }}{{ end }}
+api_key = {{ $cystemd_s3 := secret "secret/data/myproject/app" }}{{ if $cystemd_s3 }}{{ (index $cystemd_s3.Data.data "api-key") }}{{ end }}
+{{ $cystemd_s4 := secret "secret/data/myproject/tls" }}{{ if $cystemd_s4 }}{{ with $cystemd_s4.Data.data }}cert = {{ .crt }}{{ end }}{{ end }}
+{{ $cystemd_s5 := secret "secret/data/myproject/env" }}{{ if $cystemd_s5 }}{{ range $k, $v := $cystemd_s5.Data.data }}{{ $k }}={{ $v }}
+{{ end }}{{ end -}}
+note = plain text that mentions secret "here" stays as it is

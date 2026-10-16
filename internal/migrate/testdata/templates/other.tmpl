@@ -1,0 +1,2 @@
+second = {{ secretField "secret/myproject/app" "db_user" }}
+dynamic = {{ $p := "secret/myproject/app" }}{{ secret $p }}

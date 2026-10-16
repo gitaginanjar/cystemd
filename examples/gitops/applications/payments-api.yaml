@@ -1,0 +1,39 @@
+apiVersion: cystemd.io/v1alpha1
+kind: Application
+metadata:
+  name: payments-api
+  labels:
+    team: payments
+spec:
+  project: platform
+  source:
+    repoURL: https://git.example.com/platform/deploy.git
+    targetRevision: main
+    path: apps/payments-api
+    systemd:
+      valuesFile: values.yaml
+      selector: payments-api
+      configKey: .${selector}.services.${selector}.config.[]
+      versionKey: .${selector}.global.image.tag
+      cpuKey: .${selector}.services.${selector}.deployment.resources.limits.cpu
+      memoryKey: .${selector}.services.${selector}.deployment.resources.limits.memory
+      unit: payments-api.service
+      # One instance on each node of the "payments" pool
+      # (client meta cystemd_selector_payments = "true").
+      replicas: 0
+      nodeSelector: payments
+      secrets:
+        - vaultPath: kubernetes/payments/payments-api
+          destination: .env
+      service:
+        port: 8080
+        check:
+          type: http
+          path: /healthz
+  destination:
+    name: in-cluster
+    namespace: platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

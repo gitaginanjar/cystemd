@@ -1,0 +1,29 @@
+# The cystemd agent: Nomad with the CYSTEMD control plane, web UI and
+# systemd task driver built in. Server and client agents use the same unit;
+# their role comes from /etc/cystemd/agent.d/*.hcl (deploy/agent).
+[Unit]
+Description=CYSTEMD agent (Nomad with the CYSTEMD control plane and systemd driver)
+Documentation=https://github.com/gitaginanjar/cystemd
+Wants=network-online.target
+After=network-online.target
+# The control plane uses the local Consul agent and Vault Agent proxy.
+Wants=consul.service vault-agent.service
+After=consul.service vault-agent.service
+
+[Service]
+ExecStart=/usr/bin/cystemd agent -config /etc/cystemd/agent.d
+ExecReload=/bin/kill -HUP $MAINPID
+# The agent supervises its tasks: stop it alone and let tasks drain.
+KillMode=process
+KillSignal=SIGINT
+Restart=on-failure
+RestartSec=2
+# Nomad clients manage cgroups for their tasks.
+Delegate=yes
+LimitNOFILE=65536
+LimitNPROC=infinity
+TasksMax=infinity
+OOMScoreAdjust=-1000
+
+[Install]
+WantedBy=multi-user.target

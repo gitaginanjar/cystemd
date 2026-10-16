@@ -1,5 +1,11 @@
+# editor / local
 .swo
 .swp
 .claude
 .env
 .json
+
+# build outputs
+/build/
+/bin/
+/dist/

@@ -176,7 +176,11 @@ cystemdctl account generate-token -account ci -id gitlab -expires-in 365d
 ```
 
 Unlike a v4 JWT, such a token can be revoked
-(`cystemdctl account delete-token -account ci gitlab`). While the clients
+(`cystemdctl account delete-token -account ci gitlab`). A pipeline that
+deploys one project's applications only can instead hold a project role's
+token, which cannot reach beyond that project
+(`cystemdctl proj role create-token <project> <role>`, see
+[APPLICATIONS.md](APPLICATIONS.md#roles)). While the clients
 move, `auth { legacy_public_key_file }` accepts v4 JWTs (as `role:admin`) on
 the API. Remove it when they are done.
 

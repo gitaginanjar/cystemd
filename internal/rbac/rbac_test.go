@@ -62,3 +62,42 @@ func TestPolicyErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestEnforceWithGrant(t *testing.T) {
+	e, err := New(`
+p, role:team-a, applications, *, team-a/*, allow
+p, ldap:auditors, applications, sync, payments/frozen, deny
+g, alice, role:team-a
+`, RoleReadonly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ci := &Grant{Subjects: []string{"proj:payments:ci"}}
+	ci.Allow("proj:payments:ci", "applications", "sync", "payments/*", true)
+	ci.Allow("proj:payments:ci", "applications", "sync", "payments/db", false)
+	cases := []struct {
+		user   string
+		groups []string
+		g      *Grant
+		act    string
+		obj    string
+		want   bool
+	}{
+		{"proj:payments:ci", nil, ci, "sync", "payments/web", true},
+		{"proj:payments:ci", nil, nil, "sync", "payments/web", false},            // without the grant
+		{"proj:payments:ci", nil, ci, "sync", "payments/db", false},              // the role's deny
+		{"proj:payments:ci", nil, ci, "sync", "billing/web", false},              // another project
+		{"proj:payments:ci", nil, ci, "get", "billing/web", true},                // the default role still applies
+		{"bob", []string{"ldap:auditors"}, ci, "sync", "payments/frozen", false}, // a policy deny wins over the grant
+		{"alice", nil, ci, "sync", "team-a/x", true},
+		{"alice", nil, &Grant{}, "sync", "payments/web", false},
+	}
+	for _, c := range cases {
+		if got := e.EnforceWith(c.user, c.groups, c.g, "applications", c.act, c.obj); got != c.want {
+			t.Errorf("%s %v grant=%v %s %s = %v, want %v", c.user, c.groups, c.g != nil, c.act, c.obj, got, c.want)
+		}
+	}
+	if !(*Grant)(nil).Empty() || !(&Grant{}).Empty() || ci.Empty() {
+		t.Fatal("Empty")
+	}
+}

@@ -262,6 +262,71 @@ func TestPutProject(t *testing.T) {
 	}
 }
 
+func TestProjectStatusIsTheControlPlanes(t *testing.T) {
+	ctx := context.Background()
+	s := New(NewMemoryKV(), "cystemd")
+	p := &v1alpha1.AppProject{Metadata: v1alpha1.ObjectMeta{Name: "payments"}, Spec: v1alpha1.AppProjectSpec{
+		Roles: []v1alpha1.ProjectRole{{Name: "ci"}, {Name: "ops"}},
+	}}
+	// A client's status is ignored.
+	p.Status.JWTTokensByRole = map[string]v1alpha1.JWTTokens{"ci": {Items: []v1alpha1.JWTToken{{ID: "forged", IssuedAt: 1}}}}
+	if err := s.PutProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetProject(ctx, "payments"); len(got.Status.JWTTokensByRole) != 0 {
+		t.Fatalf("client status stored: %+v", got.Status)
+	}
+
+	// MutateProject records tokens; a later replacement keeps them.
+	add := func(role, id string) {
+		t.Helper()
+		if _, err := s.MutateProject(ctx, "payments", func(p *v1alpha1.AppProject) error {
+			if p.Status.JWTTokensByRole == nil {
+				p.Status.JWTTokensByRole = map[string]v1alpha1.JWTTokens{}
+			}
+			toks := p.Status.JWTTokensByRole[role]
+			toks.Items = append(toks.Items, v1alpha1.JWTToken{ID: id, IssuedAt: 100})
+			p.Status.JWTTokensByRole[role] = toks
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("ci", "t1")
+	add("ops", "t2")
+	replaced := &v1alpha1.AppProject{Metadata: v1alpha1.ObjectMeta{Name: "payments"}, Spec: v1alpha1.AppProjectSpec{
+		Description: "re-applied", Roles: []v1alpha1.ProjectRole{{Name: "ci"}, {Name: "ops"}},
+	}}
+	if err := s.PutProject(ctx, replaced); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetProject(ctx, "payments")
+	if got.Spec.Description != "re-applied" || len(got.RoleTokens("ci")) != 1 || len(got.RoleTokens("ops")) != 1 {
+		t.Fatalf("tokens lost on replace: %+v", got.Status)
+	}
+	// A role's tokens go with it.
+	got.Spec.Roles = got.Spec.Roles[:1]
+	if err := s.PutProject(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.GetProject(ctx, "payments")
+	if len(got.RoleTokens("ci")) != 1 || got.Status.JWTTokensByRole["ops"].Items != nil {
+		t.Fatalf("after removing ops: %+v", got.Status)
+	}
+
+	// The default project, never stored, is stored on its first change.
+	def, err := s.MutateProject(ctx, v1alpha1.DefaultProject, func(p *v1alpha1.AppProject) error {
+		p.Spec.Roles = append(p.Spec.Roles, v1alpha1.ProjectRole{Name: "viewer"})
+		return nil
+	})
+	if err != nil || def.Role("viewer") == nil || def.Metadata.ResourceVersion == "" || len(def.Spec.SourceRepos) != 1 {
+		t.Fatalf("default: %+v %v", def, err)
+	}
+	if _, err := s.MutateProject(ctx, "nope", func(*v1alpha1.AppProject) error { return nil }); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing project: %v", err)
+	}
+}
+
 func TestRepositoryNeverStoresSecrets(t *testing.T) {
 	ctx := context.Background()
 	kv := NewMemoryKV()

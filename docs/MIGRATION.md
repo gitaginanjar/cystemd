@@ -37,7 +37,7 @@ the pool, and the HTTP API becomes the CYSTEMD API, UI and CLI.
 | `dnf.makecache_repos`, `makecache_timeout` | The driver's `makecache_repos`, `makecache_timeout` |
 | `GIT_REPOSITORY`, `GIT_SSH_KEY_PRIVATE`, `GIT_SSH_KNOWN_HOSTS` | A `repository {}` block and `git {}` in the control plane configuration |
 | `GIT_INTERVAL` | `controller { reconcile_interval }`, plus webhooks |
-| `auth`, `AUTH_PUBLIC_KEY_FILE` (Ed25519 JWTs) | Accounts, Nomad-token login and RBAC; `auth { legacy_public_key_file }` keeps v4 JWTs working meanwhile |
+| `auth`, `AUTH_PUBLIC_KEY_FILE` (Ed25519 JWTs) | Accounts, API tokens, Nomad-token login and RBAC; `auth { legacy_public_key_file }` keeps v4 JWTs working meanwhile |
 | `VAULT_ROLE_ID`, `VAULT_SECRET_ID`, `VAULT_TOKEN` | A Vault Agent per host (AppRole), never in CYSTEMD |
 | `VAULT_TEMPLATES` | The host Vault Agent's templates |
 | `vault.renewal_*`, the in-process agent | Vault Agent and Nomad renew tokens and leases |
@@ -156,10 +156,29 @@ v4's endpoints are gone. Scripts that called them move to the CLI or the API
 cystemdctl app sync payments-api -revision "$GIT_COMMIT" -timeout 15m
 ```
 
-with a session token in `CYSTEMD_TOKEN`, or, with the agent's `cystemd`
-binary, a Nomad ACL token in `NOMAD_TOKEN`. While they move, `auth {
-legacy_public_key_file }` accepts v4 JWTs (as `role:admin`) on the API.
-Remove it when they are done.
+with an API token in `CYSTEMD_TOKEN`, or, with the agent's `cystemd` binary,
+a Nomad ACL token in `NOMAD_TOKEN`. The v4 JWTs CI held become API tokens of
+an account declared for it, with only the permissions it needs:
+
+```hcl
+auth {
+  account "ci" {
+    capabilities = ["apiKey"]
+  }
+}
+rbac {
+  policy = "p, ci, applications, sync, default/payments-*, allow"
+}
+```
+
+```sh
+cystemdctl account generate-token -account ci -id gitlab -expires-in 365d
+```
+
+Unlike a v4 JWT, such a token can be revoked
+(`cystemdctl account delete-token -account ci gitlab`). While the clients
+move, `auth { legacy_public_key_file }` accepts v4 JWTs (as `role:admin`) on
+the API. Remove it when they are done.
 
 ## Templates
 

@@ -79,6 +79,14 @@ auth {
   # sso {
   #   auth_methods = ["example-idp"]
   # }
+
+  # Local accounts besides the admin (deploy/README.md): login (a password,
+  # which the admin sets) and/or apiKey (API tokens, for pipelines).
+  # Removing a block deletes the account, its tokens with it.
+  account "ci" {
+    capabilities = ["apiKey"]
+  }
+  # account "alice" {}                  # login only
 }
 
 # Argo CD's RBAC policy format. Built-in roles: role:admin, role:readonly.
@@ -91,6 +99,7 @@ rbac {
     p, role:deployer, applications, action, */*, allow
     p, role:deployer, logs, get, */*, allow
     g, payments-team, role:deployer
+    g, ci, role:deployer
   EOT
 }
 

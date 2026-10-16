@@ -211,7 +211,8 @@ EOT
 
 The control plane creates them when it starts, updates their capabilities
 and `enabled` state, and deletes the accounts no longer declared, with their
-tokens. A new account has no password: the admin sets one, confirming with
+tokens: keep the `account` blocks the same on every server (or
+`cystemd-server` replica), since the last one to start applies its own. A new account has no password: the admin sets one, confirming with
 the admin's own password:
 
 ```sh

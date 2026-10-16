@@ -5,6 +5,7 @@ package controller_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -653,4 +654,138 @@ func TestControllerOrphanedResources(t *testing.T) {
 	}
 	e.refresh("web")
 	e.waitApp("web", 60*time.Second, func(a *v1.Application) bool { return !hasWarning(a) })
+}
+
+func childManifest(name, finalizer string) string {
+	fin := ""
+	if finalizer != "" {
+		fin = "\n  finalizers: [" + finalizer + "]"
+	}
+	return fmt.Sprintf(`---
+apiVersion: cystemd.io/v1alpha1
+kind: Application
+metadata:
+  name: %s%s
+spec:
+  source: {repoURL: "%%s", path: apps/%s, targetRevision: master}
+  syncPolicy: {automated: {prune: true}}
+`, name, fin, name)
+}
+
+func TestControllerAppOfApps(t *testing.T) {
+	e := setup(t)
+	manifests := func(children ...string) string {
+		return strings.ReplaceAll(strings.Join(children, ""), "%s", e.repo.URL())
+	}
+	web, api := childManifest("web", v1.ResourcesFinalizer), childManifest("api", "")
+	e.repo.Commit(t, "apps", map[string]string{
+		"apps/web/web.nomad.hcl":         sleepJob("web", 1, ""),
+		"apps/api/api.nomad.hcl":         sleepJob("api", 1, ""),
+		"applications/applications.yaml": manifests(web, api),
+	})
+	if _, err := e.store.CreateApplication(e.ctx, &v1.Application{
+		Metadata: v1.ObjectMeta{Name: "platform"},
+		Spec: v1.ApplicationSpec{Project: "default",
+			Source: v1.ApplicationSource{RepoURL: e.repo.URL(), Path: "applications", TargetRevision: "master",
+				Applications: &v1.ApplicationsSource{}},
+			SyncPolicy: &v1.SyncPolicy{Automated: &v1.SyncPolicyAutomated{Prune: true, SelfHeal: true}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The parent creates its Applications, which deploy their jobs.
+	a := e.waitApp("platform", 2*time.Minute, func(a *v1.Application) bool {
+		if a.Status.Sync.Status != v1.SyncStatusSynced || len(a.Status.Resources) != 2 {
+			return false
+		}
+		for _, r := range a.Status.Resources {
+			if r.Kind != v1.KindApplication || r.Health == nil || r.Health.Status != v1.HealthStatusHealthy {
+				return false
+			}
+		}
+		return true
+	})
+	if a.Status.Health.Status != v1.HealthStatusHealthy {
+		t.Fatalf("parent health = %+v", a.Status.Health)
+	}
+	for _, name := range []string{"web", "api"} {
+		child := e.app(name)
+		if child.Metadata.Labels[v1.AppMetaKey] != "platform" || e.job(name) == nil {
+			t.Fatalf("%s: labels %v, job %v", name, child.Metadata.Labels, e.job(name) != nil)
+		}
+	}
+	live := &controller.Live{Clusters: e.clusters, Repos: e.repos, Apps: e.store}
+	tree, err := live.Tree(e.ctx, a)
+	if err != nil || len(tree.Nodes) != 2 || tree.Nodes[0].Kind != v1.KindApplication {
+		t.Fatalf("tree = %+v, %v", tree, err)
+	}
+	diffs, err := live.ManagedResources(e.ctx, a)
+	if err != nil || len(diffs) != 2 || diffs[0].Modified || !strings.Contains(diffs[0].TargetState, "path: apps/") {
+		t.Fatalf("diffs = %+v, %v", diffs, err)
+	}
+
+	// An edit made outside Git is undone (self-heal).
+	if _, err := e.store.MutateApplication(e.ctx, "api", func(a *v1.Application) error {
+		a.Spec.Source.Path = "apps/elsewhere"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Eventually(t, time.Minute, func() (bool, string) {
+		p := e.app("api").Spec.Source.Path
+		return p == "apps/api", p
+	})
+
+	// An Application removed from Git is pruned; without the resources
+	// finalizer, its job stays.
+	e.repo.Commit(t, "drop api", map[string]string{"applications/applications.yaml": manifests(web)})
+	e.refresh("platform")
+	testutil.Eventually(t, time.Minute, func() (bool, string) {
+		_, err := e.store.GetApplication(e.ctx, "api")
+		return errors.Is(err, store.ErrNotFound), fmt.Sprint(err)
+	})
+	if j := e.job("api"); j == nil || (j.Stop != nil && *j.Stop) {
+		t.Fatal("pruning an Application without the finalizer stopped its job")
+	}
+
+	// Only the projects the parent allows.
+	if err := e.store.PutProject(e.ctx, &v1.AppProject{Metadata: v1.ObjectMeta{Name: "other"},
+		Spec: v1.AppProjectSpec{SourceRepos: []string{"*"}, Destinations: []v1.ApplicationDestination{{Name: "*", Namespace: "*"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	foreign := strings.Replace(childManifest("batch", ""), "spec:\n", "spec:\n  project: other\n", 1)
+	e.repo.Commit(t, "batch in another project", map[string]string{"applications/applications.yaml": manifests(web, foreign)})
+	e.refresh("platform")
+	e.waitApp("platform", time.Minute, func(a *v1.Application) bool {
+		for _, c := range a.Status.Conditions {
+			if c.Type == v1.ConditionComparisonError && strings.Contains(c.Message, `its project "other" is not one`) {
+				return true
+			}
+		}
+		return false
+	})
+	if _, err := e.store.GetApplication(e.ctx, "batch"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatal("an Application of a project the parent may not use was created")
+	}
+	e.repo.Commit(t, "back", map[string]string{"applications/applications.yaml": manifests(web)})
+	e.refresh("platform")
+	e.waitApp("platform", time.Minute, func(a *v1.Application) bool { return a.Status.Sync.Status == v1.SyncStatusSynced })
+
+	// Deleting the parent with cascade deletes its Applications, and theirs
+	// (with the finalizer) their jobs.
+	if _, err := e.store.MutateApplication(e.ctx, "platform", func(a *v1.Application) error {
+		now := time.Now()
+		a.Metadata.DeletionTimestamp = &now
+		a.Metadata.Finalizers = append(a.Metadata.Finalizers, v1.ResourcesFinalizer)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Eventually(t, time.Minute, func() (bool, string) {
+		_, perr := e.store.GetApplication(e.ctx, "platform")
+		_, werr := e.store.GetApplication(e.ctx, "web")
+		j := e.job("web")
+		return errors.Is(perr, store.ErrNotFound) && errors.Is(werr, store.ErrNotFound) && j == nil,
+			fmt.Sprintf("platform=%v web=%v web job=%v", perr, werr, j != nil)
+	})
 }

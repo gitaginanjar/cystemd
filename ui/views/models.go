@@ -9,6 +9,7 @@ package views
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -585,6 +586,18 @@ type AccountView struct {
 	Capabilities  []string
 	Groups        []string
 	PasswordMtime *time.Time
+	Tokens        []TokenView
+}
+
+// HasCapability reports whether the account has a capability (login,
+// apiKey).
+func (a AccountView) HasCapability(c string) bool { return slices.Contains(a.Capabilities, c) }
+
+// TokenView is an API token (its ID: the token is shown once).
+type TokenView struct {
+	ID        string
+	IssuedAt  time.Time
+	ExpiresAt *time.Time
 }
 
 // AccountsPage lists local accounts.
@@ -592,6 +605,28 @@ type AccountsPage struct {
 	Page
 	Accounts []AccountView
 	Error    string
+}
+
+// AccountPage shows a local account and its API tokens.
+type AccountPage struct {
+	Page
+	Account AccountView
+	Tokens  AccountTokens
+}
+
+// AccountTokens is the API tokens section of an account page.
+type AccountTokens struct {
+	Account string
+	// APIKey: the account has the apiKey capability.
+	APIKey bool
+	// CanUpdate: the caller may generate and delete the tokens.
+	CanUpdate bool
+	Tokens    []TokenView
+	// NewToken is a token just generated, shown this once.
+	NewToken, NewID string
+	Error           string
+	// ExpiresIn and ID keep the form's values after an error.
+	ExpiresIn, ID string
 }
 
 // AppearancePage picks the theme.

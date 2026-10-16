@@ -4,12 +4,14 @@
 package server
 
 import (
+	"cmp"
 	"errors"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/gitaginanjar/cystemd/internal/auth"
+	"github.com/gitaginanjar/cystemd/internal/store"
 )
 
 type loginRequest struct {
@@ -118,13 +120,21 @@ func (s *Server) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.userInfo(r))
 }
 
-// AccountInfo is a local account without its secret.
+// AccountInfo is a local account without its secrets.
 type AccountInfo struct {
 	Name          string     `json:"name"`
 	Enabled       bool       `json:"enabled"`
 	Capabilities  []string   `json:"capabilities,omitempty"`
 	Groups        []string   `json:"groups,omitempty"`
 	PasswordMtime *time.Time `json:"passwordMtime,omitempty"`
+	// Tokens are the account's API tokens (their IDs: a token is shown
+	// once, when generated).
+	Tokens []store.APIToken `json:"tokens,omitempty"`
+}
+
+func accountInfo(a *store.Account) AccountInfo {
+	return AccountInfo{Name: a.Name, Enabled: a.Enabled, Capabilities: a.Capabilities, Groups: a.Groups,
+		PasswordMtime: a.PasswordMtime, Tokens: a.Tokens}
 }
 
 // account describes the caller's own account.
@@ -137,7 +147,131 @@ func (s *Server) account(r *http.Request) (*AccountInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &AccountInfo{Name: acct.Name, Enabled: acct.Enabled, Capabilities: acct.Capabilities, Groups: acct.Groups, PasswordMtime: acct.PasswordMtime}, nil
+	info := accountInfo(acct)
+	return &info, nil
+}
+
+// accountAccess checks that the caller may act on a local account: its own
+// when signed in with its password (an API token only reads its account),
+// any with accounts/<action>.
+func (s *Server) accountAccess(r *http.Request, action, name string) error {
+	id := identity(r)
+	if id.Provider == auth.ProviderLocal && id.Username == name && (action == "get" || id.TokenID == "") {
+		return nil
+	}
+	return s.authorize(r, "accounts", action, name)
+}
+
+// getAccount describes a local account.
+func (s *Server) getAccount(r *http.Request, name string) (*AccountInfo, error) {
+	if err := s.accountAccess(r, "get", name); err != nil {
+		return nil, err
+	}
+	acct, err := s.Store.GetAccount(r.Context(), name)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, notFound("account %s not found", name)
+	}
+	if err != nil {
+		return nil, err
+	}
+	info := accountInfo(acct)
+	return &info, nil
+}
+
+func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) {
+	out, err := s.getAccount(r, r.PathValue("name"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type tokenRequest struct {
+	// ID names the token (default: random).
+	ID string `json:"id"`
+	// ExpiresIn is the token's lifetime in seconds; 0 never expires.
+	ExpiresIn int64 `json:"expiresIn"`
+}
+
+// TokenResponse is a new API token, shown this once: only its ID is kept.
+type TokenResponse struct {
+	Token string `json:"token"`
+	store.APIToken
+}
+
+// maxTokenLifetime bounds expiresIn (in seconds) well below overflowing a
+// time.Duration.
+const maxTokenLifetime = 100 * 365 * 24 * 3600
+
+// generateToken issues an API token for an account with the apiKey
+// capability.
+func (s *Server) generateToken(r *http.Request, name string, req tokenRequest) (*TokenResponse, error) {
+	if err := s.accountAccess(r, "update", name); err != nil {
+		return nil, err
+	}
+	if req.ExpiresIn < 0 || req.ExpiresIn > maxTokenLifetime {
+		return nil, badRequest("expiresIn is a number of seconds (at most a century), 0 for a token that does not expire")
+	}
+	tok, rec, err := s.Auth.GenerateToken(r.Context(), name, req.ID, time.Duration(req.ExpiresIn)*time.Second)
+	if errors.Is(err, store.ErrNotFound) {
+		err = notFound("account %s not found", name)
+	}
+	if err != nil {
+		s.audit(r, "accounts/generate-token", name, "FAILED", err.Error())
+		return nil, err
+	}
+	s.audit(r, "accounts/generate-token", name+"/"+rec.ID, "ALLOWED", "")
+	return &TokenResponse{Token: tok, APIToken: rec}, nil
+}
+
+func (s *Server) handleGenerateToken(w http.ResponseWriter, r *http.Request) {
+	var req tokenRequest
+	if err := decode(r, &req); err != nil {
+		s.fail(w, err)
+		return
+	}
+	out, err := s.generateToken(r, r.PathValue("name"), req)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// deleteToken revokes an API token.
+func (s *Server) deleteToken(r *http.Request, name, id string) error {
+	if err := s.accountAccess(r, "update", name); err != nil {
+		return err
+	}
+	if err := s.Auth.DeleteToken(r.Context(), name, id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			err = notFound("account %s not found", name)
+		}
+		s.audit(r, "accounts/delete-token", name+"/"+id, "FAILED", err.Error())
+		return err
+	}
+	s.audit(r, "accounts/delete-token", name+"/"+id, "ALLOWED", "")
+	return nil
+}
+
+func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request) {
+	if err := s.deleteToken(r, r.PathValue("name"), r.PathValue("id")); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+// handleCanI tells the caller whether RBAC lets it perform an action
+// (Argo CD's account can-i).
+func (s *Server) handleCanI(w http.ResponseWriter, r *http.Request) {
+	id := identity(r)
+	value := "no"
+	if s.RBAC.Enforce(id.Username, id.Groups, r.PathValue("resource"), r.PathValue("action"), r.PathValue("object")) {
+		value = "yes"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"value": value})
 }
 
 func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
@@ -150,21 +284,45 @@ func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 type passwordRequest struct {
+	// Name is the account whose password changes (default: the caller's).
+	Name string `json:"name"`
+	// CurrentPassword is the caller's.
 	CurrentPassword string `json:"currentPassword"`
 	NewPassword     string `json:"newPassword"`
 }
 
-// updatePassword changes the caller's own local password.
-func (s *Server) updatePassword(r *http.Request, current, next string) error {
+// updatePassword changes a local password: the caller's own or, for an
+// administrator (accounts/update), another account's. Either way the
+// caller confirms with its own password.
+func (s *Server) updatePassword(r *http.Request, req passwordRequest) error {
 	id := identity(r)
 	if id.Provider != auth.ProviderLocal {
 		return badRequest("only local accounts have a password")
 	}
-	if err := s.Auth.UpdatePassword(r.Context(), id.Username, current, next); err != nil {
-		s.audit(r, "accounts/update-password", id.Username, "FAILED", err.Error())
+	if id.TokenID != "" {
+		return forbidden("an API token cannot change passwords")
+	}
+	name := cmp.Or(req.Name, id.Username)
+	if name != id.Username {
+		if err := s.authorize(r, "accounts", "update", name); err != nil {
+			return err
+		}
+	}
+	err := s.Auth.CheckPassword(r.Context(), id.Username, req.CurrentPassword)
+	if err == nil {
+		err = s.Auth.SetPassword(r.Context(), name, req.NewPassword)
+	}
+	if err != nil {
+		s.audit(r, "accounts/update-password", name, "FAILED", err.Error())
+		switch {
+		case errors.Is(err, auth.ErrTooManyAttempts):
+			return statusErr(http.StatusTooManyRequests, "%s", err.Error())
+		case errors.Is(err, store.ErrNotFound):
+			return notFound("account %s not found", name)
+		}
 		return badRequest("%s", err.Error())
 	}
-	s.audit(r, "accounts/update-password", id.Username, "ALLOWED", "")
+	s.audit(r, "accounts/update-password", name, "ALLOWED", "")
 	return nil
 }
 
@@ -174,7 +332,7 @@ func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if err := s.updatePassword(r, req.CurrentPassword, req.NewPassword); err != nil {
+	if err := s.updatePassword(r, req); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -192,7 +350,7 @@ func (s *Server) listAccounts(r *http.Request) ([]AccountInfo, error) {
 	}
 	out := []AccountInfo{}
 	for _, a := range accts {
-		out = append(out, AccountInfo{Name: a.Name, Enabled: a.Enabled, Capabilities: a.Capabilities, Groups: a.Groups, PasswordMtime: a.PasswordMtime})
+		out = append(out, accountInfo(a))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil

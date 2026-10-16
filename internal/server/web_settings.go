@@ -346,7 +346,7 @@ func (s *Server) webUpdatePassword(w http.ResponseWriter, r *http.Request) {
 	case len(form.Get("new")) < 8:
 		err = badRequest("the new password must have at least 8 characters")
 	default:
-		err = s.updatePassword(r, form.Get("current"), form.Get("new"))
+		err = s.updatePassword(r, passwordRequest{CurrentPassword: form.Get("current"), NewPassword: form.Get("new")})
 	}
 	if err != nil {
 		p.Error = err.Error()

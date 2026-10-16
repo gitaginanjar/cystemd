@@ -457,6 +457,18 @@ func (m *Manager) UpdatePassword(ctx context.Context, user, current, next string
 // TTL is the session lifetime.
 func (m *Manager) TTL() time.Duration { return m.ttl }
 
+// RequestError is a request an account's state refuses (disabled, missing
+// a capability, a token ID in use...).
+type RequestError struct {
+	msg string
+	// NotFound is set when what the request names does not exist.
+	NotFound bool
+}
+
+func (e *RequestError) Error() string { return e.msg }
+
+func refuse(format string, args ...any) error { return &RequestError{msg: fmt.Sprintf(format, args...)} }
+
 // DeclaredAccount is a local account of the configuration.
 type DeclaredAccount struct {
 	Name         string
@@ -518,10 +530,10 @@ func (m *Manager) GenerateToken(ctx context.Context, account, id string, ttl tim
 		_, _ = rand.Read(b)
 		id = base64.RawURLEncoding.EncodeToString(b)
 	} else if strings.ContainsAny(id, " /?#%") || len(id) > 64 {
-		return "", store.APIToken{}, errors.New("a token ID has at most 64 characters, none of them a space, '/', '?', '#' or '%'")
+		return "", store.APIToken{}, refuse("a token ID has at most 64 characters, none of them a space, '/', '?', '#' or '%%'")
 	}
 	if account == AdminUser && !m.adminOn {
-		return "", store.APIToken{}, errors.New("the admin account is disabled")
+		return "", store.APIToken{}, refuse("the admin account is disabled")
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	rec := store.APIToken{ID: id, IssuedAt: now}
@@ -532,15 +544,15 @@ func (m *Manager) GenerateToken(ctx context.Context, account, id string, ttl tim
 	}
 	acct, err := m.store.MutateAccount(ctx, account, func(a *store.Account) error {
 		if !a.Enabled {
-			return fmt.Errorf("account %s is disabled", account)
+			return refuse("account %s is disabled", account)
 		}
 		if !slices.Contains(a.Capabilities, CapabilityAPIKey) {
-			return fmt.Errorf("account %s does not have the apiKey capability", account)
+			return refuse("account %s does not have the apiKey capability", account)
 		}
 		var kept []store.APIToken
 		for _, t := range a.Tokens {
 			if t.ID == id {
-				return fmt.Errorf("account %s already has a token %q", account, id)
+				return refuse("account %s already has a token %q", account, id)
 			}
 			if t.ExpiresAt == nil || t.ExpiresAt.After(now) {
 				kept = append(kept, t)
@@ -569,7 +581,7 @@ func (m *Manager) DeleteToken(ctx context.Context, account, id string) error {
 	_, err := m.store.MutateAccount(ctx, account, func(a *store.Account) error {
 		i := slices.IndexFunc(a.Tokens, func(t store.APIToken) bool { return t.ID == id })
 		if i < 0 {
-			return fmt.Errorf("account %s has no token %q", account, id)
+			return &RequestError{msg: fmt.Sprintf("account %s has no token %q", account, id), NotFound: true}
 		}
 		a.Tokens = slices.Delete(a.Tokens, i, i+1)
 		return nil

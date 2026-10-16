@@ -267,7 +267,11 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 
 	s.route(mux, "GET /api/v1/account", false, s.handleAccount)
 	s.route(mux, "PUT /api/v1/account/password", false, s.handleUpdatePassword)
+	s.route(mux, "GET /api/v1/account/can-i/{resource}/{action}/{object...}", false, s.handleCanI)
 	s.route(mux, "GET /api/v1/accounts", false, s.handleListAccounts)
+	s.route(mux, "GET /api/v1/accounts/{name}", false, s.handleGetAccount)
+	s.route(mux, "POST /api/v1/accounts/{name}/token", false, s.handleGenerateToken)
+	s.route(mux, "DELETE /api/v1/accounts/{name}/token/{id}", false, s.handleDeleteToken)
 
 	s.route(mux, "GET /api/v1/health", false, s.handleHealthDetail)
 }
@@ -320,9 +324,14 @@ func forbidden(format string, args ...any) error {
 // errorCode maps an error to an HTTP status.
 func errorCode(err error) int {
 	var se *statusError
+	var re *auth.RequestError
 	switch {
 	case errors.As(err, &se):
 		return se.code
+	case errors.As(err, &re) && re.NotFound:
+		return http.StatusNotFound
+	case errors.As(err, &re):
+		return http.StatusBadRequest
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, controller.ErrMissing):
 		return http.StatusNotFound
 	case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrExists):

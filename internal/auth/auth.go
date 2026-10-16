@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,13 @@ const CookieName = "cystemd.token"
 
 // AdminUser is the bootstrap account.
 const AdminUser = "admin"
+
+// Capabilities of local accounts (Argo CD's): login with a password, and
+// API tokens.
+const (
+	CapabilityLogin  = "login"
+	CapabilityAPIKey = "apiKey"
+)
 
 // Providers of an identity.
 const (
@@ -61,6 +69,8 @@ type Identity struct {
 	Provider string   `json:"provider"`
 	// IssuedAt is when the session started.
 	IssuedAt time.Time `json:"iat"`
+	// TokenID is the API token used, if any.
+	TokenID string `json:"tokenId,omitempty"`
 	// generation is the local account's session generation at login.
 	generation int64
 }
@@ -73,6 +83,8 @@ type Claims struct {
 	// Generation is the local account's session generation (see
 	// store.Account.SessionGeneration).
 	Generation int64 `json:"gen,omitempty"`
+	// APIKey marks an API token, valid while the account lists its ID.
+	APIKey bool `json:"apikey,omitempty"`
 }
 
 // NomadToken is what CYSTEMD needs of a Nomad ACL token.
@@ -144,6 +156,9 @@ type Manager struct {
 type cachedAccount struct {
 	generation int64
 	enabled    bool
+	apiKey     bool
+	groups     []string
+	tokens     map[string]bool
 	at         time.Time
 }
 
@@ -264,7 +279,7 @@ func (m *Manager) Login(ctx context.Context, username, password string) (string,
 		return "", nil, ErrTooManyAttempts
 	}
 	acct, err := m.store.GetAccount(ctx, username)
-	if err != nil || !acct.Enabled {
+	if err != nil || !acct.Enabled || !slices.Contains(acct.Capabilities, CapabilityLogin) {
 		// Burn comparable time so account existence does not leak.
 		_ = bcrypt.CompareHashAndPassword([]byte("$2a$10$CwTycUXWue0Thq9StjUM0uJ8.Ugt2r1wJm1RB5rjVEyk1Fh3jwqBi"), []byte(password))
 		m.throttle.fail(username)
@@ -365,33 +380,48 @@ func (m *Manager) Verify(ctx context.Context, token string) (*Identity, error) {
 		id.IssuedAt = claims.IssuedAt.Time
 	}
 	if id.Provider == ProviderLocal {
-		// A password change (or disabling the account) revokes older
-		// sessions: their generation is behind the account's.
-		gen, enabled, err := m.accountState(ctx, id.Username)
-		if err != nil || !enabled || claims.Generation != gen {
+		st, err := m.accountState(ctx, id.Username)
+		if err != nil || !st.enabled {
 			return nil, ErrUnauthenticated
 		}
-		id.generation = gen
+		if claims.APIKey {
+			// An API token lives while the account lists it; a password
+			// change does not revoke it.
+			if !st.apiKey || !st.tokens[claims.ID] {
+				return nil, ErrUnauthenticated
+			}
+			id.TokenID = claims.ID
+		} else if claims.Generation != st.generation {
+			// A password change revokes older sessions: their generation
+			// is behind the account's.
+			return nil, ErrUnauthenticated
+		}
+		id.generation, id.Groups = st.generation, st.groups
 	}
 	return id, nil
 }
 
-// accountState is a local account's session generation and whether it
-// is enabled, cached for a few seconds (a change reaches the other
-// control plane replicas within that time).
-func (m *Manager) accountState(ctx context.Context, user string) (int64, bool, error) {
+// accountState is what Verify needs of a local account, cached for a few
+// seconds (a change reaches the other control plane replicas within that
+// time).
+func (m *Manager) accountState(ctx context.Context, user string) (cachedAccount, error) {
 	if c, ok := m.accounts.Load(user); ok {
 		ca := c.(cachedAccount)
 		if time.Since(ca.at) < 10*time.Second {
-			return ca.generation, ca.enabled, nil
+			return ca, nil
 		}
 	}
 	acct, err := m.store.GetAccount(ctx, user)
 	if err != nil {
-		return 0, false, err
+		return cachedAccount{}, err
 	}
-	m.accounts.Store(user, cachedAccount{generation: acct.SessionGeneration, enabled: acct.Enabled, at: time.Now()})
-	return acct.SessionGeneration, acct.Enabled, nil
+	ca := cachedAccount{generation: acct.SessionGeneration, enabled: acct.Enabled, groups: acct.Groups,
+		apiKey: slices.Contains(acct.Capabilities, CapabilityAPIKey), tokens: map[string]bool{}, at: time.Now()}
+	for _, t := range acct.Tokens {
+		ca.tokens[t.ID] = true
+	}
+	m.accounts.Store(user, ca)
+	return ca, nil
 }
 
 // FromRequest authenticates a request (bearer token, then session cookie).
@@ -435,6 +465,150 @@ func (m *Manager) UpdatePassword(ctx context.Context, user, current, next string
 
 // TTL is the session lifetime.
 func (m *Manager) TTL() time.Duration { return m.ttl }
+
+// DeclaredAccount is a local account of the configuration.
+type DeclaredAccount struct {
+	Name         string
+	Capabilities []string
+	Enabled      bool
+}
+
+// SyncAccounts makes the local accounts the declared ones, besides the
+// admin: missing ones are created (without a password), the capabilities
+// and enabled state of the others updated, undeclared ones deleted.
+// Passwords and tokens are kept.
+func (m *Manager) SyncAccounts(ctx context.Context, declared []DeclaredAccount) error {
+	want := map[string]DeclaredAccount{}
+	for _, d := range declared {
+		want[d.Name] = d
+	}
+	existing, err := m.store.ListAccounts(ctx)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for _, a := range existing {
+		have[a.Name] = true
+		d, ok := want[a.Name]
+		switch {
+		case a.Name == AdminUser:
+		case !ok:
+			if err := m.store.DeleteAccount(ctx, a.Name); err != nil {
+				return err
+			}
+			m.logger.Info("deleted a local account no longer declared", "account", a.Name)
+		case a.Enabled != d.Enabled || !slices.Equal(a.Capabilities, d.Capabilities):
+			if _, err := m.store.MutateAccount(ctx, a.Name, func(acct *store.Account) error {
+				acct.Enabled, acct.Capabilities = d.Enabled, d.Capabilities
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		m.accounts.Delete(a.Name)
+	}
+	for _, d := range declared {
+		if have[d.Name] {
+			continue
+		}
+		if _, err := m.store.CreateAccountIfAbsent(ctx, &store.Account{Name: d.Name, Enabled: d.Enabled, Capabilities: d.Capabilities}); err != nil {
+			return err
+		}
+		m.logger.Info("created a local account", "account", d.Name, "capabilities", d.Capabilities)
+	}
+	return nil
+}
+
+// GenerateToken issues an API token for an account with the apiKey
+// capability; ttl 0 never expires. An empty id is chosen at random.
+func (m *Manager) GenerateToken(ctx context.Context, account, id string, ttl time.Duration) (string, store.APIToken, error) {
+	if id == "" {
+		b := make([]byte, 9)
+		_, _ = rand.Read(b)
+		id = base64.RawURLEncoding.EncodeToString(b)
+	} else if strings.ContainsAny(id, " /") || len(id) > 64 {
+		return "", store.APIToken{}, errors.New("a token ID has at most 64 characters, without spaces or slashes")
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	rec := store.APIToken{ID: id, IssuedAt: now}
+	exp := now.AddDate(100, 0, 0) // does not expire
+	if ttl > 0 {
+		e := now.Add(ttl)
+		rec.ExpiresAt, exp = &e, e
+	}
+	acct, err := m.store.MutateAccount(ctx, account, func(a *store.Account) error {
+		if !a.Enabled {
+			return fmt.Errorf("account %s is disabled", account)
+		}
+		if !slices.Contains(a.Capabilities, CapabilityAPIKey) {
+			return fmt.Errorf("account %s does not have the apiKey capability", account)
+		}
+		var kept []store.APIToken
+		for _, t := range a.Tokens {
+			if t.ID == id {
+				return fmt.Errorf("account %s already has a token %q", account, id)
+			}
+			if t.ExpiresAt == nil || t.ExpiresAt.After(now) {
+				kept = append(kept, t)
+			}
+		}
+		a.Tokens = append(kept, rec)
+		return nil
+	})
+	if err != nil {
+		return "", store.APIToken{}, err
+	}
+	m.accounts.Delete(account)
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer: "cystemd", Subject: account, ID: id,
+			IssuedAt: jwt.NewNumericDate(now), NotBefore: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(exp),
+		},
+		Groups: acct.Groups, Provider: ProviderLocal, APIKey: true,
+	}
+	tok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(m.key)
+	return tok, rec, err
+}
+
+// DeleteToken revokes an account's API token.
+func (m *Manager) DeleteToken(ctx context.Context, account, id string) error {
+	_, err := m.store.MutateAccount(ctx, account, func(a *store.Account) error {
+		i := slices.IndexFunc(a.Tokens, func(t store.APIToken) bool { return t.ID == id })
+		if i < 0 {
+			return fmt.Errorf("account %s has no token %q", account, id)
+		}
+		a.Tokens = slices.Delete(a.Tokens, i, i+1)
+		return nil
+	})
+	m.accounts.Delete(account)
+	return err
+}
+
+// CheckPassword verifies a local account's password.
+func (m *Manager) CheckPassword(ctx context.Context, user, password string) error {
+	acct, err := m.store.GetAccount(ctx, user)
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(acct.PasswordHash), []byte(password)) != nil {
+		return ErrInvalidCredentials
+	}
+	return nil
+}
+
+// SetPassword sets a local account's password, an administrator's doing
+// (the caller is checked by the API); the account's sessions end.
+func (m *Manager) SetPassword(ctx context.Context, account, next string) error {
+	hash, err := HashPassword(next)
+	if err != nil {
+		return err
+	}
+	_, err = m.store.MutateAccount(ctx, account, func(a *store.Account) error {
+		now := time.Now().UTC()
+		a.PasswordHash, a.PasswordMtime, a.MustResetPassword = hash, &now, false
+		a.SessionGeneration++
+		return nil
+	})
+	m.accounts.Delete(account)
+	return err
+}
 
 func parseEd25519(key string) (ed25519.PublicKey, error) {
 	pk, _, _, _, err := ssh.ParseAuthorizedKey([]byte(strings.TrimSpace(key)))

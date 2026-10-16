@@ -138,20 +138,53 @@ type ApplicationSource struct {
 	// Exactly one renderer applies; Nomad is the default.
 	Nomad   *NomadSource   `json:"nomad,omitempty" yaml:"nomad,omitempty"`
 	Systemd *SystemdSource `json:"systemd,omitempty" yaml:"systemd,omitempty"`
+	// Applications makes it an app of apps: Path holds Application
+	// manifests.
+	Applications *ApplicationsSource `json:"applications,omitempty" yaml:"applications,omitempty"`
+}
+
+// ApplicationsSource is Argo CD's app of apps: the path holds Application
+// manifests, which the Application creates, updates and prunes as it does
+// jobs. They are tracked by the label cystemd.app (AppMetaKey).
+type ApplicationsSource struct {
+	// Files are glob patterns relative to Path; default *.yaml and *.yml.
+	Files []string `json:"files,omitempty" yaml:"files,omitempty"`
+	// Projects the declared Applications may belong to (default: this
+	// Application's own project). Setting it needs the right to create
+	// applications in each of them.
+	Projects []string `json:"projects,omitempty" yaml:"projects,omitempty"`
+}
+
+// AllowsProject reports whether a declared Application may belong to
+// project, parent being the declaring Application's project.
+func (s *ApplicationsSource) AllowsProject(parent, project string) bool {
+	if len(s.Projects) == 0 {
+		return project == parent
+	}
+	for _, p := range s.Projects {
+		if p == project {
+			return true
+		}
+	}
+	return false
 }
 
 // SourceType names the renderer of a source.
 type SourceType string
 
 const (
-	SourceTypeNomad   SourceType = "Nomad"
-	SourceTypeSystemd SourceType = "Systemd"
+	SourceTypeNomad        SourceType = "Nomad"
+	SourceTypeSystemd      SourceType = "Systemd"
+	SourceTypeApplications SourceType = "Applications"
 )
 
 // Type returns the source's renderer.
 func (s *ApplicationSource) Type() SourceType {
-	if s.Systemd != nil {
+	switch {
+	case s.Systemd != nil:
 		return SourceTypeSystemd
+	case s.Applications != nil:
+		return SourceTypeApplications
 	}
 	return SourceTypeNomad
 }

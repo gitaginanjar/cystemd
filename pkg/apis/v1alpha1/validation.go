@@ -39,8 +39,21 @@ func (a *Application) Validate() error {
 	if strings.HasPrefix(s.Source.Path, "/") || strings.Contains(path.Clean("/"+s.Source.Path), "..") {
 		errs = append(errs, fmt.Errorf("spec.source.path %q must be relative and stay inside the repository", s.Source.Path))
 	}
-	if s.Source.Nomad != nil && s.Source.Systemd != nil {
-		errs = append(errs, errors.New("spec.source: set only one of nomad and systemd"))
+	n := 0
+	for _, set := range []bool{s.Source.Nomad != nil, s.Source.Systemd != nil, s.Source.Applications != nil} {
+		if set {
+			n++
+		}
+	}
+	if n > 1 {
+		errs = append(errs, errors.New("spec.source: set only one of nomad, systemd and applications"))
+	}
+	if as := s.Source.Applications; as != nil {
+		for i, p := range as.Projects {
+			if err := ValidateName(p); err != nil {
+				errs = append(errs, fmt.Errorf("spec.source.applications.projects[%d]: %v", i, err))
+			}
+		}
 	}
 	if sd := s.Source.Systemd; sd != nil {
 		if sd.Replicas != nil && *sd.Replicas < 0 {
@@ -157,6 +170,19 @@ func globMatch(pattern, s string) bool {
 	re := "^" + strings.NewReplacer(`\*`, ".*", `\?`, ".").Replace(regexp.QuoteMeta(pattern)) + "$"
 	ok, _ := regexp.MatchString(re, s)
 	return ok
+}
+
+// Permits checks that the project allows the Application's repository and
+// destination.
+func (p *AppProject) Permits(app *Application) error {
+	if !p.IsSourcePermitted(app.Spec.Source.RepoURL) {
+		return fmt.Errorf("application repository %s is not permitted in project %q", app.Spec.Source.RepoURL, p.Metadata.Name)
+	}
+	if d := app.Spec.Destination; !p.IsDestinationPermitted(d) {
+		return fmt.Errorf("application destination %s/%s/%s is not permitted in project %q",
+			d.ClusterName(), d.Region, d.NamespaceOrDefault(), p.Metadata.Name)
+	}
+	return nil
 }
 
 // IsSourcePermitted reports whether the project allows repoURL.

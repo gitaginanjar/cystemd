@@ -174,12 +174,8 @@ func (s *Server) checkProject(ctx context.Context, app *v1.Application) error {
 		}
 		return err
 	}
-	if !proj.IsSourcePermitted(app.Spec.Source.RepoURL) {
-		return badRequest("application repository %s is not permitted in project %q", app.Spec.Source.RepoURL, proj.Metadata.Name)
-	}
-	if !proj.IsDestinationPermitted(app.Spec.Destination) {
-		return badRequest("application destination %s/%s/%s is not permitted in project %q",
-			app.Spec.Destination.ClusterName(), app.Spec.Destination.Region, app.Spec.Destination.NamespaceOrDefault(), proj.Metadata.Name)
+	if err := proj.Permits(app); err != nil {
+		return badRequest("%v", err)
 	}
 	if _, err := s.Clusters.Get(app.Spec.Destination.Name); err != nil {
 		return badRequest("%v", err)

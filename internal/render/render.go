@@ -26,9 +26,11 @@ type KVPair struct {
 
 // Manifests is the rendered desired state of an Application.
 type Manifests struct {
-	Jobs       []*api.Job          `json:"jobs"`
-	KV         []KVPair            `json:"kv,omitempty"`
-	SourceType v1alpha1.SourceType `json:"sourceType"`
+	Jobs []*api.Job `json:"jobs"`
+	KV   []KVPair   `json:"kv,omitempty"`
+	// Applications are those an app of apps declares.
+	Applications []*v1alpha1.Application `json:"applications,omitempty"`
+	SourceType   v1alpha1.SourceType     `json:"sourceType"`
 	// Images summarises what the jobs run (UI).
 	Images []string `json:"images,omitempty"`
 	// Sources maps job IDs to their original jobspec, stored as the Nomad
@@ -76,6 +78,8 @@ func (r *Renderer) Render(ctx context.Context, app *v1alpha1.Application, dir st
 	switch app.Spec.Source.Type() {
 	case v1alpha1.SourceTypeSystemd:
 		m, err = r.renderSystemd(app, dir)
+	case v1alpha1.SourceTypeApplications:
+		m, err = r.renderApplications(app, dir)
 	default:
 		m, err = r.renderNomad(ctx, app, dir)
 	}

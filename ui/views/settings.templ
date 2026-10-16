@@ -656,15 +656,16 @@ templ AccountsView(p AccountsPage) {
 						<th>Enabled</th>
 						<th>Capabilities</th>
 						<th>Groups</th>
+						<th>API tokens</th>
 						<th>Password changed</th>
 					</tr>
 				</thead>
 				<tbody>
 					for _, a := range p.Accounts {
-						<tr>
+						<tr class="clickable" hx-get={ AccountHref(a.Name) } hx-target="body" hx-push-url="true">
 							<td class="bold">
 								@Icon("user", "icon--sm")
-								{ a.Name }
+								<a href={ SafeURL(AccountHref(a.Name)) }>{ a.Name }</a>
 							</td>
 							<td>
 								if a.Enabled {
@@ -681,14 +682,134 @@ templ AccountsView(p AccountsPage) {
 							</td>
 							<td>{ strings.Join(a.Capabilities, ", ") }</td>
 							<td>{ strings.Join(a.Groups, ", ") }</td>
+							<td>
+								if a.HasCapability("apiKey") {
+									{ Itoa(len(a.Tokens)) }
+								} else {
+									<span class="faint">-</span>
+								}
+							</td>
 							<td class="muted">{ AgoPtr(a.PasswordMtime) }</td>
 						</tr>
 					}
 				</tbody>
 			</table>
-			<p class="muted mt">Accounts and their roles are declared in the control plane configuration (the <code>auth</code> and <code>rbac</code> blocks).</p>
+			<p class="muted mt">Accounts are declared in the control plane configuration (<code>account</code> blocks of <code>auth</code>), their permissions in the <code>rbac</code> policy.</p>
 		</main>
 	}
+}
+
+templ AccountDetailView(p AccountPage) {
+	@Shell(p.Page, nil, "") {
+		<main class="content">
+			<div class="white-box">
+				<div class="kv">
+					<div class="kv__key">Name</div>
+					<div class="bold">{ p.Account.Name }</div>
+					<div class="kv__key">Enabled</div>
+					<div>{ YesNo(p.Account.Enabled) }</div>
+					<div class="kv__key">Capabilities</div>
+					<div class="tags">
+						for _, c := range p.Account.Capabilities {
+							<span class="tag">{ c }</span>
+						}
+					</div>
+					<div class="kv__key">Groups</div>
+					<div>{ JoinOrDash(p.Account.Groups) }</div>
+					<div class="kv__key">Password changed</div>
+					if p.Account.PasswordMtime != nil {
+						<div title={ TimestampPtr(p.Account.PasswordMtime) }>{ AgoPtr(p.Account.PasswordMtime) }</div>
+					} else if p.Account.HasCapability("login") {
+						<div class="muted">never set: an administrator sets it (<code>account update-password -account { p.Account.Name }</code>)</div>
+					} else {
+						<div>-</div>
+					}
+				</div>
+			</div>
+			@AccountTokensView(p.Tokens)
+		</main>
+	}
+}
+
+// AccountTokensView is the API tokens section of an account page, swapped
+// in place when a token is generated or deleted.
+templ AccountTokensView(t AccountTokens) {
+	<div class="white-box" id="tokens">
+		<div class="white-box__title">API tokens</div>
+		if !t.APIKey {
+			<div class="muted">This account cannot have API tokens: it lacks the <code>apiKey</code> capability (<code>capabilities</code> of its <code>account</code> block).</div>
+		} else {
+			@panelError(t.Error)
+			if t.NewToken != "" {
+				<div class="alert alert--info token-new">
+					@StatusIcon("Synced")
+					<div>
+						<div class="bold">Token { t.NewID } generated. Copy it now: it is not shown again.</div>
+						<div class="token-new__value">
+							<code class="mono" data-token>{ t.NewToken }</code>
+							<button class="btn btn--sm btn--outline" type="button" data-copy={ t.NewToken }>
+								@Icon("copy", "icon--sm")
+								Copy
+							</button>
+						</div>
+					</div>
+				</div>
+			}
+			if t.CanUpdate {
+				<form class="form token-form" hx-post={ AccountHref(t.Account) + "/token" } hx-target="#tokens" hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]">
+					<label class="field">
+						<span class="field__label">Expires in</span>
+						<input class="input" name="expiresIn" value={ t.ExpiresIn } placeholder="never (e.g. 12h, 90d)"/>
+					</label>
+					<label class="field">
+						<span class="field__label">Token ID</span>
+						<input class="input" name="id" value={ t.ID } placeholder="random" maxlength="64"/>
+					</label>
+					<button class="btn" type="submit">
+						@Icon("plus")
+						Generate new
+					</button>
+				</form>
+			}
+			if len(t.Tokens) == 0 {
+				<div class="muted">No API tokens.</div>
+			} else {
+				<table class="table table--plain table--compact">
+					<thead>
+						<tr>
+							<th>ID</th>
+							<th>Issued</th>
+							<th>Expires</th>
+							if t.CanUpdate {
+								<th></th>
+							}
+						</tr>
+					</thead>
+					<tbody>
+						for _, tok := range t.Tokens {
+							<tr>
+								<td class="mono">{ tok.ID }</td>
+								<td title={ Timestamp(tok.IssuedAt) }>{ Ago(tok.IssuedAt) }</td>
+								if tok.ExpiresAt != nil {
+									<td title={ TimestampPtr(tok.ExpiresAt) }>{ AgoPtr(tok.ExpiresAt) }</td>
+								} else {
+									<td class="muted">never</td>
+								}
+								if t.CanUpdate {
+									<td class="right">
+										<button class="btn btn--sm btn--outline" type="button" hx-post={ AccountHref(t.Account) + "/token/" + url.PathEscape(tok.ID) + "/delete" } hx-target="#tokens" hx-swap="outerHTML" hx-confirm={ "Delete token " + tok.ID + "? Whatever uses it loses access." }>
+											@Icon("trash", "icon--sm")
+											Delete
+										</button>
+									</td>
+								}
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		}
+	</div>
 }
 
 templ AppearanceView(p AppearancePage) {
@@ -740,6 +861,10 @@ templ UserInfoView(p UserInfoPage) {
 					if p.Account != nil && p.Account.PasswordMtime != nil {
 						<div class="kv__key">Password changed</div>
 						<div>{ AgoPtr(p.Account.PasswordMtime) }</div>
+					}
+					if p.Account != nil && p.Account.HasCapability("apiKey") {
+						<div class="kv__key">API tokens</div>
+						<div><a href={ SafeURL(AccountHref(p.Account.Name) + "#tokens") }>{ Plural(len(p.Account.Tokens), "token") }</a></div>
 					}
 				</div>
 			</div>

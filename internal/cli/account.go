@@ -7,7 +7,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,29 +24,6 @@ func accountName(ctx context.Context, cl *client.Client, flag string) (string, e
 		return "", err
 	}
 	return info.Username, nil
-}
-
-// parseLifetime parses a token lifetime: a duration ("12h") or a number of
-// days ("30d"); 0 never expires.
-func parseLifetime(s string) (time.Duration, error) {
-	bad := fmt.Errorf("-expires-in %q is not a duration such as 12h or 30d (0: never expires)", s)
-	var d time.Duration
-	if days, ok := strings.CutSuffix(s, "d"); ok {
-		n, err := strconv.Atoi(days)
-		if err != nil || n < 0 {
-			return 0, bad
-		}
-		d = time.Duration(n) * 24 * time.Hour
-	} else {
-		var err error
-		if d, err = time.ParseDuration(s); err != nil || d < 0 {
-			return 0, bad
-		}
-	}
-	if d > 0 && d < time.Second {
-		return 0, bad
-	}
-	return d, nil
 }
 
 func expiry(t *time.Time) string {
@@ -153,9 +129,9 @@ func (c *accountGenerateTokenCommand) Run(args []string) int {
 	if _, ok := c.parse(fs, args, 0, c.opts.Name+" account generate-token [options]"); !ok {
 		return 1
 	}
-	ttl, err := parseLifetime(expiresIn)
+	ttl, err := client.ParseLifetime(expiresIn)
 	if err != nil {
-		return c.fail(err)
+		return c.fail(fmt.Errorf("-expires-in: %w", err))
 	}
 	ctx, cancel := signalContext()
 	defer cancel()

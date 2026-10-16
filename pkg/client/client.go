@@ -711,6 +711,33 @@ func (c *Client) GenerateToken(ctx context.Context, account, id string, expiresI
 	return out.Secret, &out.Token, nil
 }
 
+// ParseLifetime parses a token lifetime: a duration ("12h") or a number of
+// days ("90d"); "" and 0 never expire.
+func ParseLifetime(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	bad := fmt.Errorf("%q is not a lifetime such as 12h or 90d (0: never expires)", s)
+	var d time.Duration
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil || n < 0 || n > 36500 {
+			return 0, bad
+		}
+		d = time.Duration(n) * 24 * time.Hour
+	} else {
+		var err error
+		if d, err = time.ParseDuration(s); err != nil || d < 0 {
+			return 0, bad
+		}
+	}
+	if d > 0 && d < time.Second {
+		return 0, bad
+	}
+	return d, nil
+}
+
 // DeleteToken revokes an account's API token.
 func (c *Client) DeleteToken(ctx context.Context, account, id string) error {
 	return c.do(ctx, http.MethodDelete, "/api/v1/accounts/"+esc(account)+"/token/"+esc(id), nil, nil, nil)

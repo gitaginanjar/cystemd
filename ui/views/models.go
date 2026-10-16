@@ -138,6 +138,9 @@ type AppsPage struct {
 // AppHref is the details URL of an Application.
 func AppHref(name string) string { return "/ui/applications/" + url.PathEscape(name) }
 
+// AccountHref is the page of a local account.
+func AccountHref(name string) string { return "/ui/settings/accounts/" + url.PathEscape(name) }
+
 // ─── application details ────────────────────────────────────────────────
 
 // AppPerms are the caller's rights on one Application.

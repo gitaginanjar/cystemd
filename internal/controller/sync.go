@@ -262,7 +262,7 @@ func (c *Controller) sync(ctx context.Context, app *v1.Application, op *v1.Opera
 	sameRevision := cmp != nil && cmp.revision == sha
 
 	// Guard: an automated sync never prunes everything unless allowed.
-	if op.InitiatedBy.Automated && len(manifests.Jobs) == 0 && len(manifests.KV) == 0 &&
+	if op.InitiatedBy.Automated && len(manifests.Jobs) == 0 && len(manifests.KV) == 0 && len(manifests.Applications) == 0 &&
 		!(app.Spec.SyncPolicy.Automated != nil && app.Spec.SyncPolicy.Automated.AllowEmpty) {
 		return nil, nil, errors.New("automated sync refused: the desired state is empty (set syncPolicy.automated.allowEmpty to allow)")
 	}
@@ -415,6 +415,20 @@ func (c *Controller) sync(ctx context.Context, app *v1.Application, op *v1.Opera
 		}
 	}
 
+	// Declared Applications (app of apps).
+	for _, want := range manifests.Applications {
+		name := want.Metadata.Name
+		if !selected(so, v1.KindApplication, "", name) {
+			continue
+		}
+		if c.terminated(ctx, app.Metadata.Name) {
+			return result, jobVersions, errTerminated
+		}
+		res := &v1.ResourceResult{Kind: v1.KindApplication, Name: name, SyncPhase: "Sync"}
+		res.Status, res.Message = c.syncApp(ctx, app, want, so.DryRun)
+		result.Resources = append(result.Resources, res)
+	}
+
 	// 3. Prune.
 	prune := so.Prune && !opts[v1.SyncOptionPruneFalse]
 	desired := map[string]bool{}
@@ -477,6 +491,36 @@ func (c *Controller) sync(ctx context.Context, app *v1.Application, op *v1.Opera
 		}
 		if !so.DryRun && len(keep) != len(owned) {
 			_ = c.store.SetOwnedKeys(ctx, app.Metadata.Name, keep)
+		}
+	}
+	if tracksApps(app) {
+		children, err := c.childApps(ctx, app)
+		if err != nil {
+			return result, jobVersions, fmt.Errorf("list applications: %w", err)
+		}
+		declared := map[string]bool{}
+		for _, a := range manifests.Applications {
+			declared[a.Metadata.Name] = true
+		}
+		for _, child := range children {
+			name := child.Metadata.Name
+			if declared[name] || child.Metadata.DeletionTimestamp != nil || !selected(so, v1.KindApplication, "", name) {
+				continue
+			}
+			res := &v1.ResourceResult{Kind: v1.KindApplication, Name: name, SyncPhase: "Sync"}
+			switch {
+			case !prune:
+				res.Status, res.Message = v1.ResultPruneSkipped, "ignored (requires pruning)"
+			case so.DryRun:
+				res.Status, res.Message = v1.ResultPruned, "would be deleted (dry run)"
+			default:
+				if err := c.deleteApp(ctx, name); err != nil {
+					res.Status, res.Message = v1.ResultSyncFailed, err.Error()
+				} else {
+					res.Status, res.Message = v1.ResultPruned, "application deleted (pruned)"
+				}
+			}
+			result.Resources = append(result.Resources, res)
 		}
 	}
 
@@ -738,6 +782,19 @@ func (c *Controller) finalizeDeletion(ctx context.Context, app *v1.Application) 
 			for _, key := range owned {
 				if err := c.consul.Delete(ctx, key); err != nil {
 					errs = append(errs, fmt.Errorf("delete key %s: %w", key, err))
+				}
+			}
+		}
+		// The Applications it declared go too; their own finalizers decide
+		// about their jobs.
+		if tracksApps(app) {
+			children, err := c.childApps(ctx, app)
+			if err != nil {
+				errs = append(errs, err)
+			}
+			for _, child := range children {
+				if err := c.deleteApp(ctx, child.Metadata.Name); err != nil {
+					errs = append(errs, fmt.Errorf("delete application %s: %w", child.Metadata.Name, err))
 				}
 			}
 		}

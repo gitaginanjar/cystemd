@@ -133,6 +133,13 @@ func (c *Controller) Run(ctx context.Context) {
 	// requests and deletions all arrive here.
 	go func() {
 		for ev := range c.store.WatchApplications(ctx) {
+			// An app of apps compares again when one of its Applications
+			// changes or goes (self-heal of what is done outside Git).
+			if ev.Application != nil {
+				if parent := ev.Application.Metadata.Labels[v1.AppMetaKey]; parent != "" {
+					queue.add(parent, false)
+				}
+			}
 			if ev.Type == store.EventDeleted {
 				continue
 			}

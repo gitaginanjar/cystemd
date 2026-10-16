@@ -249,7 +249,13 @@ func (s *Store) WatchApplications(ctx context.Context) <-chan AppEvent {
 	ch := make(chan AppEvent, 64)
 	go func() {
 		defer close(ch)
-		known := map[string]uint64{}
+		// known: the modify index and labels of every Application seen, so
+		// that a deletion still says who declared it.
+		type seenApp struct {
+			index  uint64
+			labels map[string]string
+		}
+		known := map[string]seenApp{}
 		var index uint64
 		backoff := time.Second
 		for ctx.Err() == nil {
@@ -270,7 +276,7 @@ func (s *Store) WatchApplications(ctx context.Context) <-chan AppEvent {
 				name := strings.TrimPrefix(e.Key, s.key(applicationsDir, ""))
 				seen[name] = true
 				prev, ok := known[name]
-				if ok && prev == e.ModifyIndex {
+				if ok && prev.index == e.ModifyIndex {
 					continue
 				}
 				app, err := decodeApp(e)
@@ -281,19 +287,19 @@ func (s *Store) WatchApplications(ctx context.Context) <-chan AppEvent {
 				if !ok {
 					typ = EventAdded
 				}
-				known[name] = e.ModifyIndex
+				known[name] = seenApp{index: e.ModifyIndex, labels: app.Metadata.Labels}
 				select {
 				case ch <- AppEvent{Type: typ, Application: app}:
 				case <-ctx.Done():
 					return
 				}
 			}
-			for name := range known {
+			for name, last := range known {
 				if seen[name] {
 					continue
 				}
 				delete(known, name)
-				gone := &v1alpha1.Application{Metadata: v1alpha1.ObjectMeta{Name: name}}
+				gone := &v1alpha1.Application{Metadata: v1alpha1.ObjectMeta{Name: name, Labels: last.labels}}
 				select {
 				case ch <- AppEvent{Type: EventDeleted, Application: gone}:
 				case <-ctx.Done():

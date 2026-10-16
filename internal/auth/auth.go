@@ -380,6 +380,9 @@ func (m *Manager) Verify(ctx context.Context, token string) (*Identity, error) {
 		id.IssuedAt = claims.IssuedAt.Time
 	}
 	if id.Provider == ProviderLocal {
+		if id.Username == AdminUser && !m.adminOn {
+			return nil, ErrUnauthenticated
+		}
 		st, err := m.accountState(ctx, id.Username)
 		if err != nil || !st.enabled {
 			return nil, ErrUnauthenticated
@@ -445,22 +448,10 @@ func (m *Manager) FromRequest(r *http.Request) (*Identity, error) {
 // UpdatePassword changes a local account's password (sessions issued
 // before the change stop working).
 func (m *Manager) UpdatePassword(ctx context.Context, user, current, next string) error {
-	acct, err := m.store.GetAccount(ctx, user)
-	if err != nil {
-		return ErrInvalidCredentials
-	}
-	if bcrypt.CompareHashAndPassword([]byte(acct.PasswordHash), []byte(current)) != nil {
-		return ErrInvalidCredentials
-	}
-	hash, err := HashPassword(next)
-	if err != nil {
+	if err := m.CheckPassword(ctx, user, current); err != nil {
 		return err
 	}
-	now := time.Now().UTC()
-	acct.PasswordHash, acct.PasswordMtime, acct.MustResetPassword = hash, &now, false
-	acct.SessionGeneration++
-	m.accounts.Delete(user)
-	return m.store.PutAccount(ctx, acct)
+	return m.SetPassword(ctx, user, next)
 }
 
 // TTL is the session lifetime.
@@ -473,12 +464,13 @@ type DeclaredAccount struct {
 	Enabled      bool
 }
 
-// SyncAccounts makes the local accounts the declared ones, besides the
-// admin: missing ones are created (without a password), the capabilities
-// and enabled state of the others updated, undeclared ones deleted.
-// Passwords and tokens are kept.
+// SyncAccounts makes the local accounts the declared ones: missing ones
+// are created (without a password), the capabilities and enabled state of
+// the others updated (their passwords and tokens kept), undeclared ones
+// deleted. The admin is never created nor deleted here; it has the login
+// capability unless declared otherwise.
 func (m *Manager) SyncAccounts(ctx context.Context, declared []DeclaredAccount) error {
-	want := map[string]DeclaredAccount{}
+	want := map[string]DeclaredAccount{AdminUser: {Name: AdminUser, Capabilities: []string{CapabilityLogin}, Enabled: true}}
 	for _, d := range declared {
 		want[d.Name] = d
 	}
@@ -491,7 +483,6 @@ func (m *Manager) SyncAccounts(ctx context.Context, declared []DeclaredAccount) 
 		have[a.Name] = true
 		d, ok := want[a.Name]
 		switch {
-		case a.Name == AdminUser:
 		case !ok:
 			if err := m.store.DeleteAccount(ctx, a.Name); err != nil {
 				return err
@@ -508,7 +499,7 @@ func (m *Manager) SyncAccounts(ctx context.Context, declared []DeclaredAccount) 
 		m.accounts.Delete(a.Name)
 	}
 	for _, d := range declared {
-		if have[d.Name] {
+		if have[d.Name] || d.Name == AdminUser {
 			continue
 		}
 		if _, err := m.store.CreateAccountIfAbsent(ctx, &store.Account{Name: d.Name, Enabled: d.Enabled, Capabilities: d.Capabilities}); err != nil {
@@ -526,8 +517,11 @@ func (m *Manager) GenerateToken(ctx context.Context, account, id string, ttl tim
 		b := make([]byte, 9)
 		_, _ = rand.Read(b)
 		id = base64.RawURLEncoding.EncodeToString(b)
-	} else if strings.ContainsAny(id, " /") || len(id) > 64 {
-		return "", store.APIToken{}, errors.New("a token ID has at most 64 characters, without spaces or slashes")
+	} else if strings.ContainsAny(id, " /?#%") || len(id) > 64 {
+		return "", store.APIToken{}, errors.New("a token ID has at most 64 characters, none of them a space, '/', '?', '#' or '%'")
+	}
+	if account == AdminUser && !m.adminOn {
+		return "", store.APIToken{}, errors.New("the admin account is disabled")
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	rec := store.APIToken{ID: id, IssuedAt: now}
@@ -584,17 +578,24 @@ func (m *Manager) DeleteToken(ctx context.Context, account, id string) error {
 	return err
 }
 
-// CheckPassword verifies a local account's password.
+// CheckPassword verifies a local account's password; failures count
+// towards the login throttle.
 func (m *Manager) CheckPassword(ctx context.Context, user, password string) error {
+	if !m.throttle.allow(user) {
+		return ErrTooManyAttempts
+	}
 	acct, err := m.store.GetAccount(ctx, user)
 	if err != nil || bcrypt.CompareHashAndPassword([]byte(acct.PasswordHash), []byte(password)) != nil {
+		m.throttle.fail(user)
 		return ErrInvalidCredentials
 	}
+	m.throttle.reset(user)
 	return nil
 }
 
-// SetPassword sets a local account's password, an administrator's doing
-// (the caller is checked by the API); the account's sessions end.
+// SetPassword sets a local account's password, ending its sessions (not
+// its API tokens). The caller is the one checked: the account itself, or
+// an administrator.
 func (m *Manager) SetPassword(ctx context.Context, account, next string) error {
 	hash, err := HashPassword(next)
 	if err != nil {

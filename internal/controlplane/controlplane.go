@@ -178,6 +178,13 @@ func New(ctx context.Context, cfg *config.Config, o Options) (*ControlPlane, err
 	if err != nil {
 		return nil, err
 	}
+	declared := make([]auth.DeclaredAccount, 0, len(cfg.Auth.Accounts))
+	for _, a := range cfg.Auth.Accounts {
+		declared = append(declared, auth.DeclaredAccount{Name: a.Name, Capabilities: a.Capabilities, Enabled: *a.Enabled})
+	}
+	if err := am.SyncAccounts(ctx, declared); err != nil {
+		return nil, fmt.Errorf("accounts: %w", err)
+	}
 	policy := cfg.RBAC.Policy
 	if cfg.RBAC.PolicyFile != "" {
 		b, err := os.ReadFile(cfg.RBAC.PolicyFile)

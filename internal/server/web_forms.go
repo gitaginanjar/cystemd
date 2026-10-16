@@ -46,6 +46,9 @@ func appFormFromValues(v url.Values) views.AppForm {
 		NomadVars:     v.Get("nomadVars"),
 		NomadConsulKV: trimmed(v, "nomadConsulKV"),
 
+		ApplicationsFiles:    trimmed(v, "applicationsFiles"),
+		ApplicationsProjects: trimmed(v, "applicationsProjects"),
+
 		SystemdValuesFile:      trimmed(v, "systemdValuesFile"),
 		SystemdSelector:        trimmed(v, "systemdSelector"),
 		SystemdConfigKey:       trimmed(v, "systemdConfigKey"),
@@ -73,7 +76,9 @@ func appFormFromValues(v url.Values) views.AppForm {
 	for _, o := range v["syncOption"] {
 		f.SyncOptions[o] = true
 	}
-	if f.SourceType != string(v1.SourceTypeSystemd) {
+	switch f.SourceType {
+	case string(v1.SourceTypeSystemd), string(v1.SourceTypeApplications):
+	default:
 		f.SourceType = string(v1.SourceTypeNomad)
 	}
 	return f
@@ -140,16 +145,20 @@ func applyAppForm(app *v1.Application, f views.AppForm) error {
 	if src.TargetRevision == "HEAD" {
 		src.TargetRevision = ""
 	}
-	if f.SourceType == string(v1.SourceTypeSystemd) {
-		src.Nomad = nil
+	switch f.SourceType {
+	case string(v1.SourceTypeApplications):
+		src.Nomad, src.Systemd = nil, nil
+		src.Applications = &v1.ApplicationsSource{Files: splitList(f.ApplicationsFiles), Projects: splitList(f.ApplicationsProjects)}
+	case string(v1.SourceTypeSystemd):
+		src.Nomad, src.Applications = nil, nil
 		if src.Systemd == nil {
 			src.Systemd = &v1.SystemdSource{}
 		}
 		if err := applySystemdForm(src.Systemd, f); err != nil {
 			return err
 		}
-	} else {
-		src.Systemd = nil
+	default:
+		src.Systemd, src.Applications = nil, nil
 		vars, err := parseKV(f.NomadVars, "variable")
 		if err != nil {
 			return err
@@ -273,6 +282,9 @@ func appForm(a *v1.Application) views.AppForm {
 		for _, o := range a.Spec.SyncPolicy.SyncOptions {
 			f.SyncOptions[o] = true
 		}
+	}
+	if as := a.Spec.Source.Applications; as != nil {
+		f.ApplicationsFiles, f.ApplicationsProjects = strings.Join(as.Files, ", "), strings.Join(as.Projects, ", ")
 	}
 	if n := a.Spec.Source.Nomad; n != nil {
 		f.NomadFiles, f.NomadVarFiles = strings.Join(n.Files, ", "), strings.Join(n.VarFiles, ", ")

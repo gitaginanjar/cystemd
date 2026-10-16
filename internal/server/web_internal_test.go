@@ -220,6 +220,14 @@ func TestAppFormRoundTrip(t *testing.T) {
 				}},
 			},
 		},
+		{
+			Metadata: v1.ObjectMeta{Name: "platform"},
+			Spec: v1.ApplicationSpec{
+				Project: "default",
+				Source: v1.ApplicationSource{RepoURL: "https://git.example.com/ops.git", Path: "applications",
+					Applications: &v1.ApplicationsSource{Files: []string{"*.yaml"}, Projects: []string{"default", "payments"}}},
+			},
+		},
 	}
 	for _, a := range apps {
 		next := a.DeepCopy()

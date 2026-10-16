@@ -418,13 +418,21 @@ templ AppFormFields(f AppForm, o FormOptions, isNew bool) {
 		<div class="form-section__title">Source type</div>
 		<div class="checks">
 			<label class="check">
-				<input type="radio" name="sourceType" value="Nomad" checked?={ f.SourceType != "Systemd" }/>
+				<input type="radio" name="sourceType" value="Nomad" checked?={ f.SourceType != "Systemd" && f.SourceType != "Applications" }/>
 				Nomad jobspecs
 			</label>
 			<label class="check">
 				<input type="radio" name="sourceType" value="Systemd" checked?={ f.SourceType == "Systemd" }/>
 				systemd service from a values file
 			</label>
+			<label class="check">
+				<input type="radio" name="sourceType" value="Applications" checked?={ f.SourceType == "Applications" }/>
+				Applications (app of apps)
+			</label>
+		</div>
+		<div class="form-grid mt source-type__applications">
+			@textField("Manifest files", "applicationsFiles", f.ApplicationsFiles, "*.yaml, *.yml", "Application manifests in the path; glob patterns, comma separated.")
+			@textField("Projects", "applicationsProjects", f.ApplicationsProjects, "this application's project", "Projects the declared applications may belong to, comma separated.")
 		</div>
 		<div class="form-grid mt source-type__nomad">
 			<label class="field">

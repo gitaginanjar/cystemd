@@ -200,6 +200,9 @@ spec:
 - An Application declared by another one, or one declaring its own
   ancestor, is refused.
 
+In the UI, choose the source type *Applications (app of apps)*; with the
+CLI, `app create … -applications [-applications-project <name>]…`.
+
 ## Destinations
 
 `destination.name` is a cluster of the control plane: `in-cluster` (the Nomad

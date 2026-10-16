@@ -683,8 +683,9 @@ html.nav-collapsed .sidebar__collapse .icon { transform: rotate(180deg); }
 .toast .crack, .alert .crack { stroke: var(--surface); }
 
 /* Source type and connection method sections follow the radio choice. */
-.source-type:has(input[name="sourceType"][value="Nomad"]:checked) .source-type__systemd,
-.source-type:has(input[name="sourceType"][value="Systemd"]:checked) .source-type__nomad { display: none; }
+.source-type:has(input[name="sourceType"][value="Nomad"]:checked) :is(.source-type__systemd, .source-type__applications),
+.source-type:has(input[name="sourceType"][value="Systemd"]:checked) :is(.source-type__nomad, .source-type__applications),
+.source-type:has(input[name="sourceType"][value="Applications"]:checked) :is(.source-type__nomad, .source-type__systemd) { display: none; }
 .repo-form:has(input[name="method"][value="https"]:checked) .repo-form__ssh,
 .repo-form:has(input[name="method"][value="ssh"]:checked) .repo-form__https { display: none; }
 

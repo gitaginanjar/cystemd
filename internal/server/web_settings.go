@@ -6,11 +6,16 @@ package server
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/a-h/templ"
 
+	"github.com/gitaginanjar/cystemd/internal/auth"
 	v1 "github.com/gitaginanjar/cystemd/pkg/apis/v1alpha1"
+	"github.com/gitaginanjar/cystemd/pkg/client"
 	"github.com/gitaginanjar/cystemd/ui/views"
 )
 
@@ -275,7 +280,86 @@ func (s *Server) webCluster(w http.ResponseWriter, r *http.Request) {
 // ─── accounts, appearance, user info ────────────────────────────────────
 
 func accountView(a AccountInfo) views.AccountView {
-	return views.AccountView{Name: a.Name, Enabled: a.Enabled, Capabilities: a.Capabilities, Groups: a.Groups, PasswordMtime: a.PasswordMtime}
+	v := views.AccountView{Name: a.Name, Enabled: a.Enabled, Capabilities: a.Capabilities, Groups: a.Groups, PasswordMtime: a.PasswordMtime}
+	for _, t := range a.Tokens {
+		v.Tokens = append(v.Tokens, views.TokenView{ID: t.ID, IssuedAt: t.IssuedAt, ExpiresAt: t.ExpiresAt})
+	}
+	return v
+}
+
+func (s *Server) accountTokens(r *http.Request, a *AccountInfo) views.AccountTokens {
+	return views.AccountTokens{
+		Account: a.Name, APIKey: slices.Contains(a.Capabilities, auth.CapabilityAPIKey),
+		CanUpdate: s.mayUpdateAccount(r, a.Name), Tokens: accountView(*a).Tokens,
+	}
+}
+
+func (s *Server) webAccount(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	a, err := s.getAccount(r, name)
+	if err != nil {
+		s.webFail(w, r, err)
+		return
+	}
+	crumbs := []views.Crumb{settingsCrumb, {Label: "Accounts", Href: "/ui/settings/accounts"}, {Label: name}}
+	if !s.RBAC.Enforce(identity(r).Username, identity(r).Groups, "accounts", "get", "*") {
+		crumbs = []views.Crumb{{Label: "User info", Href: "/ui/user-info"}, {Label: name}}
+	}
+	p := views.AccountPage{
+		Page:    s.page(w, r, "Account "+name, "settings", "Account", crumbs...),
+		Account: accountView(*a), Tokens: s.accountTokens(r, a),
+	}
+	s.render(w, r, http.StatusOK, views.AccountDetailView(p))
+}
+
+// webGenerateToken generates an API token and shows it, once, in the
+// account's tokens section.
+func (s *Server) webGenerateToken(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	form, err := formValues(r)
+	if err != nil {
+		s.webFail(w, r, err)
+		return
+	}
+	a, err := s.getAccount(r, name)
+	if err != nil {
+		s.webFail(w, r, err)
+		return
+	}
+	t := s.accountTokens(r, a)
+	t.ExpiresIn, t.ID = form.Get("expiresIn"), form.Get("id")
+	ttl, err := client.ParseLifetime(t.ExpiresIn)
+	if err != nil {
+		err = badRequest("expires in: %v", err)
+	}
+	var res *TokenResponse
+	if err == nil {
+		res, err = s.generateToken(r, name, tokenRequest{ID: strings.TrimSpace(t.ID), ExpiresIn: int64(ttl / time.Second)})
+	}
+	if err != nil {
+		t.Error = err.Error()
+		s.render(w, r, errorCode(err), views.AccountTokensView(t))
+		return
+	}
+	if a, err = s.getAccount(r, name); err == nil {
+		t.Tokens = accountView(*a).Tokens
+	}
+	t.NewToken, t.NewID, t.ExpiresIn, t.ID = res.Token, res.ID, "", ""
+	s.render(w, r, http.StatusOK, templ.Join(views.AccountTokensView(t), views.Toasts(success("Token "+res.ID+" generated."))))
+}
+
+func (s *Server) webDeleteToken(w http.ResponseWriter, r *http.Request) {
+	name, id := r.PathValue("name"), r.PathValue("id")
+	if err := s.deleteToken(r, name, id); err != nil {
+		s.webFail(w, r, err)
+		return
+	}
+	a, err := s.getAccount(r, name)
+	if err != nil {
+		s.webFail(w, r, err)
+		return
+	}
+	s.render(w, r, http.StatusOK, templ.Join(views.AccountTokensView(s.accountTokens(r, a)), views.Toasts(success("Token "+id+" deleted."))))
 }
 
 func (s *Server) webAccounts(w http.ResponseWriter, r *http.Request) {

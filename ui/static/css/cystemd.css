@@ -703,3 +703,10 @@ html.nav-collapsed .sidebar__collapse .icon { transform: rotate(180deg); }
 .btn--outline.btn--danger { background: var(--surface); color: var(--danger); border-color: var(--danger); }
 .btn--outline.btn--danger:hover { background: var(--danger); color: #fff; }
 .details-bar { background: var(--bg); }
+
+/* API tokens: the generate form on one row, a new token shown once. */
+.token-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; margin-bottom: 14px; }
+.token-form .field { width: 220px; }
+.token-new { margin-bottom: 14px; }
+.token-new__value { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.token-new__value code { flex: 1; min-width: 0; padding: 6px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; word-break: break-all; user-select: all; }

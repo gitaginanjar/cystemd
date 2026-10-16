@@ -796,7 +796,7 @@ templ AccountTokensView(t AccountTokens) {
 									<td class="muted">never</td>
 								}
 								if t.CanUpdate {
-									<td class="right">
+									<td class="table__actions">
 										<button class="btn btn--sm btn--outline" type="button" hx-post={ AccountHref(t.Account) + "/token/" + url.PathEscape(tok.ID) + "/delete" } hx-target="#tokens" hx-swap="outerHTML" hx-confirm={ "Delete token " + tok.ID + "? Whatever uses it loses access." }>
 											@Icon("trash", "icon--sm")
 											Delete

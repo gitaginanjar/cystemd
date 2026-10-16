@@ -151,15 +151,27 @@ func (s *Server) account(r *http.Request) (*AccountInfo, error) {
 	return &info, nil
 }
 
-// accountAccess checks that the caller may act on a local account: its own
-// when signed in with its password (an API token only reads its account),
-// any with accounts/<action>.
-func (s *Server) accountAccess(r *http.Request, action, name string) error {
+// ownAccount reports whether the caller acts on its own local account:
+// signed in with its password, or reading it with one of its API tokens.
+func ownAccount(r *http.Request, action, name string) bool {
 	id := identity(r)
-	if id.Provider == auth.ProviderLocal && id.Username == name && (action == "get" || id.TokenID == "") {
+	return id.Provider == auth.ProviderLocal && id.Username == name && (action == "get" || id.TokenID == "")
+}
+
+// accountAccess checks that the caller may act on a local account: its own
+// (see ownAccount), any with accounts/<action>.
+func (s *Server) accountAccess(r *http.Request, action, name string) error {
+	if ownAccount(r, action, name) {
 		return nil
 	}
 	return s.authorize(r, "accounts", action, name)
+}
+
+// mayUpdateAccount is accountAccess(update) without the audit of a denial,
+// for showing controls.
+func (s *Server) mayUpdateAccount(r *http.Request, name string) bool {
+	id := identity(r)
+	return ownAccount(r, "update", name) || s.RBAC.Enforce(id.Username, id.Groups, "accounts", "update", name)
 }
 
 // getAccount describes a local account.
